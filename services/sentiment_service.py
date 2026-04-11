@@ -2,7 +2,7 @@ from transformers import pipeline
 import re
 import logging
 import asyncio
-from schemas.discover_schema import AnalyzedReview
+from schemas.discover_schema import AnalyzedReview, UserReview
 
 logger = logging.getLogger(__name__)
 
@@ -18,41 +18,16 @@ class SentimentService:
         except Exception as e:
             logger.error(f"Lỗi khi tải PhoBERT: {str(e)}")
             self.sentiment_analyzer = None
-
-    async def _analyze_sentiment(self, text: str) -> float:
-        """
-        Gọi PhoBERT để phân tích cảm xúc văn bản tiếng Việt.
-        """
-        if not self.sentiment_analyzer:
-            return 3.0
-
-        try:
-            # Model trả về dạng: [{'label': 'POS', 'score': 0.987}]
-            result = self.sentiment_analyzer(text)[0]
-            label = result['label']
-            confidence = result['score'] # Giá trị từ 0.0 đến 1.0
-            
-            # Khởi tạo điểm mặc định là trung bình
-            final_score = 3.0 
-            
-            if label == 'POS':
-                # Càng tự tin là Tích cực -> Điểm càng tiến gần về 5.0
-                final_score = 3.0 + (confidence * 2.0)
-                
-            elif label == 'NEG':
-                # Càng tự tin là Tiêu cực -> Điểm càng tiến gần về 1.0
-                final_score = 3.0 - (confidence * 2.0)
-                
-            elif label == 'NEU':
-                # Nếu là trung tính, giữ điểm lân cận 3.0
-                final_score = 3.0
-                
-            # Đảm bảo điểm số luôn nằm trong giới hạn an toàn và làm tròn 1 chữ số thập phân
-            return round(min(max(final_score, 1.0), 5.0), 1)
-                
-        except Exception as e:
-            logger.error(f"Lỗi khi chạy PhoBERT với text '{text}': {str(e)}")
-            return 3.0
+        
+    def _convert_to_score(self, label: str, confidence: float) -> float:
+        """Hàm phụ trợ chuyển đổi label thành điểm 1-5"""
+        final_score = 3.0 
+        if label == 'POS':
+            final_score = 3.0 + (confidence * 2.0)
+        elif label == 'NEG':
+            final_score = 3.0 - (confidence * 2.0)
+        
+        return round(min(max(final_score, 1.0), 5.0), 1)
 
     def _check_vague(self, text: str) -> bool:
         """
@@ -79,9 +54,9 @@ class SentimentService:
 
         return False
 
-    async def calculate_real_rating(self, raw_reviews: list[dict]) -> tuple[float, float, list[AnalyzedReview]]:
+    async def calculate_real_rating(self, raw_reviews: list[UserReview]) -> tuple[float, float, list[AnalyzedReview]]:
         """
-        Hàm này nhận vào danh sách review gốc (mỗi review là dict có 'text' và 'raw_stars') và trả về:
+        Hàm này nhận vào danh sách review gốc (mỗi review là UserReview có text và raw_stars) và trả về:
         - Điểm đánh giá thực tế đã được điều chỉnh (float)
         - Trọng số tin cậy trung bình của các review (float)
         - Danh sách review đã được phân tích chi tiết (list of AnalyzedReview)
@@ -91,13 +66,26 @@ class SentimentService:
             return 0.0, 0.0, []
 
         # 1. Tách dữ liệu để xử lí song song với asyncio
-        texts = [rev.get("text", "") for rev in raw_reviews]
-        
-        # Tạo danh sách các coroutines để gọi PhoBERT
-        sentiment_tasks = [self._analyze_sentiment(text) for text in texts]
-        
-        # Chạy tất cả cùng một lúc thay vì đợi từng cái
-        sentiment_scores = await asyncio.gather(*sentiment_tasks)
+        texts = [rev.text for rev in raw_reviews]
+
+        # 2. Chạy PhoBERT theo lô batch nếu có thể để tối ưu hiệu suất
+        sentiment_scores = []
+
+        # Chạy batch trong 1 thread duy nhất để không block event loop
+        if self.sentiment_analyzer:
+            try:
+                # Đưa toàn bộ list 'texts' vào pipeline trong 1 thread duy nhất.
+                results = await asyncio.to_thread(self.sentiment_analyzer, texts)
+                
+                # results là list of dicts: [{'label': 'POS', 'score': 0.9}, {...}]
+                for res in results:
+                    score = self._convert_to_score(res['label'], res['score'])
+                    sentiment_scores.append(score)
+            except Exception as e:
+                logger.error(f"Lỗi khi chạy PhoBERT Batch: {str(e)}")
+                sentiment_scores = [3.0] * len(texts) # Fallback nếu lỗi
+        else:
+            sentiment_scores = [3.0] * len(texts)
 
         analyzed_list = []
         total_weighted_stars = 0.0
@@ -105,8 +93,8 @@ class SentimentService:
 
         # 2. Xử lý từng review cùng với điểm sentiment tương ứng để tính điểm điều chỉnh và trọng số tin cậy
         for rev, sentiment_score in zip(raw_reviews, sentiment_scores):
-            text = rev.get("text", "")
-            raw_stars = float(rev.get("raw_stars", 3.0))
+            text = rev.text
+            raw_stars = rev.raw_stars
 
             # Kiểm tra vague
             is_vague = self._check_vague(text)
