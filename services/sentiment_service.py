@@ -2,6 +2,7 @@ from transformers import pipeline
 import re
 import logging
 import asyncio
+from schemas.discover_schema import AnalyzedReview
 
 logger = logging.getLogger(__name__)
 
@@ -78,12 +79,12 @@ class SentimentService:
 
         return False
 
-    async def calculate_real_rating(self, raw_reviews: list[dict]) -> tuple[float, float, list[dict]]:
+    async def calculate_real_rating(self, raw_reviews: list[dict]) -> tuple[float, float, list[AnalyzedReview]]:
         """
         Hàm này nhận vào danh sách review gốc (mỗi review là dict có 'text' và 'raw_stars') và trả về:
         - Điểm đánh giá thực tế đã được điều chỉnh (float)
         - Trọng số tin cậy trung bình của các review (float)
-        - Danh sách review đã được phân tích chi tiết (list of dict)
+        - Danh sách review đã được phân tích chi tiết (list of AnalyzedReview)
         """
         
         if not raw_reviews:
@@ -126,13 +127,15 @@ class SentimentService:
             adjusted_stars = round(min(max(adjusted_stars, 1.0), 5.0), 1)
 
             # Cập nhật kết quả
-            analyzed_list.append({
-                "text": text,
-                "raw_stars": raw_stars,
-                "sentiment_score": sentiment_score,
-                "trust_weight": trust_weight,
-                "adjusted_stars": adjusted_stars
-            })
+            analyzed_list.append(
+                AnalyzedReview(
+                    text=text,
+                    raw_stars=raw_stars,
+                    sentiment_score=sentiment_score,
+                    trust_weight=trust_weight,
+                    adjusted_stars=adjusted_stars
+                )
+            )
 
             total_weighted_stars += adjusted_stars * trust_weight
             total_weight += trust_weight
