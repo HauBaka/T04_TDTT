@@ -77,7 +77,7 @@ class SummaryService:
 
         Cấu trúc JSON đầu ra:
         {{
-            "ai_overview": "Viết 1 đoạn văn ngắn (2-3 câu) tóm tắt tổng quan nhất về chất lượng, vị trí và trải nghiệm tại khách sạn này.",
+            "overview": "Viết 1 đoạn văn ngắn (2-3 câu) tóm tắt tổng quan nhất về chất lượng, vị trí và trải nghiệm tại khách sạn này.",
             "pros": ["Ưu điểm 1", "Ưu điểm 2"],
             "cons": ["Nhược điểm 1", "Nhược điểm 2"],
             "notes": "1 câu tóm tắt vibe chung, phốt (nếu có), hoặc lời khuyên chân thành cho người sắp đặt phòng."
