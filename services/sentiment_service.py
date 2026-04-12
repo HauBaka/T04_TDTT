@@ -75,6 +75,7 @@ class SentimentService:
         if self.sentiment_analyzer:
             try:
                 # Đưa toàn bộ list 'texts' vào pipeline trong 1 thread duy nhất.
+                # XXX: có thể thêm batch_size nếu số lượng review quá lớn
                 results = await asyncio.to_thread(self.sentiment_analyzer, texts)
                 
                 # results là list of dicts: [{'label': 'POS', 'score': 0.9}, {...}]
@@ -133,3 +134,5 @@ class SentimentService:
         avg_trust = total_weight / len(raw_reviews)
 
         return round(final_real_rating, 2), round(avg_trust, 2), analyzed_list
+    
+sentiment_service = SentimentService()

@@ -1,18 +1,17 @@
 from core.exceptions import *
 from datetime import datetime, timezone, timedelta
 from schemas.discover_schema import DiscoverRequest, DiscoverHotel, AIReviewSummary
-from services.sentiment_service import SentimentService
+from services.sentiment_service import sentiment_service
 from services.summary_service import SummaryService
-from utils.parse_expiration_date import parse_expiration_date
 import asyncio
-
+from loguru import logger
 REAL_RATING_CACHE_EXPIRATION_DAYS=7
 SUMMARY_CACHE_EXPIRATION_DAYS = 14 
 
 class DiscoverService:
     def __init__(self, payload: DiscoverRequest):
         self.payload = payload
-        self.sentiment_service = SentimentService()
+        self.sentiment_service = sentiment_service
         self.summary_service = SummaryService()
 
     async def raw_search(self) -> list[DiscoverHotel]:
@@ -22,7 +21,7 @@ class DiscoverService:
         """Lọc dữ liệu thô theo các tiêu chí cứng"""
         return []
     
-    async def process_places_real_rating(self, filtered_places: list[DiscoverHotel]) -> list[DiscoverHotel]:
+    async def process_places_real_rating(self, filtered_places: list[DiscoverHotel]):
         """
         Xử lý điểm đánh giá thực tế cho từng khách sạn trong danh sách đã lọc. Cụ thể:
         Với mỗi khách sạn trong filtered_places, kiểm tra xem đã có điểm đánh giá thực tế (ai_score) và ngày hết hạn của điểm đó (ai_score_expiration_date):
@@ -30,67 +29,58 @@ class DiscoverService:
             - Nếu không có hoặc đã hết hạn, gọi SentimentService để tính điểm đánh giá thực tế mới dựa trên review gốc và phân tích cảm xúc
         """
         
-        if not filtered_places:
-            return []
+        if not filtered_places or len(filtered_places) == 0:
+            return
         
         sentiment_tasks = []
         places_needing_calculation = []
         now = datetime.now(timezone.utc)
 
         for place in filtered_places:
-            needs_calculation = False 
-            expiration_date_str = getattr(place, "ai_score_expiration_date", None)
-            has_cache = hasattr(place, "analyzed_reviews") and len(place.analyzed_reviews) > 0
+            expiration_date = place.ai_score_expiration_date # Sử dụng datetime để so sánh, tránh chuyển đổi qua lại giữa string và datetime
+            has_cache = len(place.analyzed_reviews) > 0 # Đã có AI review chưa
 
-            if has_cache and expiration_date_str:
-                try:
-                    expiration_date = parse_expiration_date(expiration_date_str)
-                    # Kiểm tra còn hạn hay không
-                    if now >= expiration_date:
-                        # Đã vượt quá ngày hết hạn -> Cần tính lại
-                        needs_calculation = True
-                except (ValueError, TypeError):
-                    # Lỗi định dạng ngày tháng -> Bắt buộc tính lại
-                    needs_calculation = True
-            else:
-                # Chưa có điểm đánh giá thực tế hoặc chưa có ngày hết hạn -> Cần tính lại
-                needs_calculation = True
-            
+            if has_cache and (expiration_date and now < expiration_date):
+                # Nếu đã có ai review và còn hạn, thì không cần tính lại
+                continue
 
-            # Gọi AI nếu cần thiết
-            if needs_calculation:
-                # Lấy raw_reviews (danh sách UserReview) từ object
-                raw_reviews = getattr(place, "user_reviews", [])
-                
-                # Đưa vào hàng đợi để gọi AI song song
-                task = self.sentiment_service.calculate_real_rating(raw_reviews)
-                sentiment_tasks.append(task)
-                places_needing_calculation.append(place)
+            # Lấy raw_reviews (danh sách UserReview) từ object
+            raw_reviews = place.user_reviews # luôn có trường này
+            if not raw_reviews or len(raw_reviews) == 0:
+                # Nếu không có review nào, không thể tính điểm đánh giá thực tế, gán mặc định để tránh lỗi
+                place.ai_score = place.raw_rating 
+                place.analyzed_reviews = []
+                place.ai_score_expiration_date = now + timedelta(days=REAL_RATING_CACHE_EXPIRATION_DAYS)
+                place.trust_weight = 0.0 # Không có review nào -> không đáng tin cậy
+                continue
+
+            # Đưa vào hàng đợi để gọi AI xử lí song song
+            task = self.sentiment_service.calculate_real_rating(raw_reviews)
+            sentiment_tasks.append(task)
+            places_needing_calculation.append(place)
 
         # Thực thi tất cả các tác vụ AI cùng lúc
         if sentiment_tasks:
             results = await asyncio.gather(*sentiment_tasks, return_exceptions=True)
-            new_expiration_date = (now + timedelta(days=REAL_RATING_CACHE_EXPIRATION_DAYS)).isoformat()
+            new_expiration_date = now + timedelta(days=REAL_RATING_CACHE_EXPIRATION_DAYS) # Sử dụng datetime 
             # Cập nhật kết quả vào từng place tương ứng
             for place, result in zip(places_needing_calculation, results):
-                if isinstance(result, Exception):
-                    
+                if isinstance(result, BaseException):
                     # Nếu có lỗi khi gọi AI, gán mặc định tạm thời để tránh bị kẹt 7 ngày không có điểm đánh giá nào cả
                     place.ai_score = place.raw_rating  # Hoặc có thể gán một giá trị mặc định nào đó
                     place.analyzed_reviews = []
-                    place.ai_score_expiration_date = now.isoformat()
+                    place.ai_score_expiration_date = now
                     place.trust_weight = 0.0
                     continue
 
+                # Gán kết quả AI vào Place
                 real_rating, trust_weight, analyzed_reviews = result
                 place.ai_score = real_rating
                 place.trust_weight = trust_weight
                 place.analyzed_reviews = analyzed_reviews
                 place.ai_score_expiration_date = new_expiration_date
-
-        return filtered_places
     
-    async def process_places_ai_summary(self, filtered_places: list[DiscoverHotel]) -> list[DiscoverHotel]:
+    async def process_places_ai_summary(self, filtered_places: list[DiscoverHotel]):
         """
         Module này sẽ đảm nhiệm việc tạo tóm tắt AI cho từng khách sạn dựa trên review đã phân tích, tiện ích và vị trí lân cận. Cụ thể:
         Với mỗi khách sạn trong filtered_places, kiểm tra xem đã có tóm tắt AI (ai_summary) và ngày hết hạn của tóm tắt đó (ai_summary_expiration_date):
@@ -99,7 +89,7 @@ class DiscoverService:
         """
         
         if not filtered_places:
-            return []
+            return
 
         ai_tasks = []
         places_needing_summary = []
@@ -107,44 +97,30 @@ class DiscoverService:
 
         for place in filtered_places:
             # Lấy dữ liệu cần thiết để gọi AI Summary
-            user_reviews = getattr(place, "analyzed_reviews", [])
-            amenities = getattr(place, "amenities", [])
-            nearby_places = getattr(place, "nearby_places", [])
+            user_reviews = place.analyzed_reviews 
+            amenities = place.amenities
+            nearby_places = place.nearby_places
             
             hotel_name = place.name 
             
-            needs_ai_call = False
-
             # 2. Kiểm tra đã có ai_summary và ai_summary_expiration_date chưa
-            ai_summary = getattr(place, "ai_summary", None)
-            expiration_date_str = getattr(place, "ai_summary_expiration_date", None)
+            ai_summary = place.ai_summary
+            expiration_date = place.ai_summary_expiration_date # Sử dụng datetime
 
-            if ai_summary and expiration_date_str:
-                try:
-                    expiration_date = parse_expiration_date(expiration_date_str)
-                    
-                    # Kiểm tra ai_summary còn hạn hay không
-                    if now >= expiration_date:
-                        # Đã vượt quá ngày hết hạn -> Cần gọi AI
-                        needs_ai_call = True
-                except (ValueError, TypeError):
-                    # Lỗi định dạng ngày tháng -> Bắt buộc tính lại
-                    needs_ai_call = True
-            else:
-                # Chưa có ai_summary -> Cần gọi AI
-                needs_ai_call = True
+            if ai_summary and expiration_date and now < expiration_date:
+                # Nếu đã có tóm tắt và còn hạn, không cần gọi AI
+                continue
 
             # Chuẩn bị luồng gọi AI nếu cần thiết
-            if needs_ai_call:
-                # Tạo coroutine cho việc gọi AI Summary, nhưng chưa chạy ngay mà sẽ chạy cùng lúc ở bước sau để tối ưu hiệu suất
-                task = self.summary_service.generate_places_summary(
-                    analyzed_reviews=user_reviews,
-                    hotel_name=hotel_name,
-                    amenities=amenities,
-                    nearby_places=nearby_places
-                )
-                ai_tasks.append(task)
-                places_needing_summary.append(place)
+            # Tạo coroutine cho việc gọi AI Summary, nhưng chưa chạy ngay mà sẽ chạy cùng lúc ở bước sau để tối ưu hiệu suất
+            task = self.summary_service.generate_places_summary(
+                analyzed_reviews=user_reviews,
+                hotel_name=hotel_name,
+                amenities=amenities,
+                nearby_places=nearby_places
+            )
+            ai_tasks.append(task)
+            places_needing_summary.append(place)
 
         # Thực thi tất cả các tác vụ AI Summary cùng lúc
         if ai_tasks:
@@ -152,7 +128,7 @@ class DiscoverService:
             summaries_results = await asyncio.gather(*ai_tasks, return_exceptions=True)
 
             # Tính toán ngày hết hạn mới cho những place được update
-            new_expiration_date = (now + timedelta(days=SUMMARY_CACHE_EXPIRATION_DAYS)).isoformat()
+            new_expiration_date = now + timedelta(days=SUMMARY_CACHE_EXPIRATION_DAYS)
 
             # Cập nhật kết quả AI vào từng place tương ứng
             for place, summary in zip(places_needing_summary, summaries_results):
@@ -164,18 +140,18 @@ class DiscoverService:
                         notes="Không thể tổng hợp bằng AI lúc này."
                     )
                     # Đặt ngày hết hạn là thời điểm hiện tại (now) để lần tìm kiếm sau nó tự động gọi lại AI thay vì bị kẹt 14 ngày
-                    place.ai_summary_expiration_date = now.isoformat()
+                    place.ai_summary_expiration_date = now
                     continue
 
                 # Cập nhật kết quả AI vào Place
                 place.ai_summary = summary
                 place.ai_summary_expiration_date = new_expiration_date
 
-        return filtered_places
-
     async def execute_discover_pipeline(self, payload: DiscoverRequest) -> list[DiscoverHotel]:
         """Thực thi pipeline tìm kiếm"""
         raw_results = await self.raw_search()
         filtered_results = await self.hard_filter()
+        await self.process_places_real_rating(filtered_results)
+        await self.process_places_ai_summary(filtered_results)
         # ...
         return []

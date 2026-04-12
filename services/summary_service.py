@@ -11,8 +11,13 @@ class SummaryService:
     def __init__(self):
         self.ai_client = gemini_client
 
-    async def generate_places_summary(self, analyzed_reviews: list[AnalyzedReview], hotel_name: str,
-        amenities: list[str] = None,nearby_places: list[NearbyPlace] = None) -> AIReviewSummary:
+    async def generate_places_summary(
+                self, 
+                analyzed_reviews: list[AnalyzedReview], 
+                hotel_name: str,
+                amenities: list[str] = [],
+                nearby_places: list[NearbyPlace] = []
+            ) -> AIReviewSummary:
         
         """
         Multi-source RAG: Tóm tắt dựa trên Reviews, Tiện ích và Vị trí.
