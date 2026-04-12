@@ -135,6 +135,7 @@ class DiscoverService:
                 if isinstance(summary, Exception):
                     # Nếu Gemini lỗi, gán mặc định tạm thời để tránh bị kẹt 14 ngày không có tóm tắt nào cả
                     place.ai_summary = AIReviewSummary(
+                        overview="Không thể tải tóm tắt tổng quan lúc này.",
                         pros=["Lỗi hệ thống khi tải tóm tắt ưu điểm."],
                         cons=["Lỗi hệ thống khi tải tóm tắt nhược điểm."],
                         notes="Không thể tổng hợp bằng AI lúc này."

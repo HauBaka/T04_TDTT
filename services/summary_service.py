@@ -77,6 +77,7 @@ class SummaryService:
 
         Cấu trúc JSON đầu ra:
         {{
+            "ai_overview": "Viết 1 đoạn văn ngắn (2-3 câu) tóm tắt tổng quan nhất về chất lượng, vị trí và trải nghiệm tại khách sạn này.",
             "pros": ["Ưu điểm 1", "Ưu điểm 2"],
             "cons": ["Nhược điểm 1", "Nhược điểm 2"],
             "notes": "1 câu tóm tắt vibe chung, phốt (nếu có), hoặc lời khuyên chân thành cho người sắp đặt phòng."
@@ -116,6 +117,7 @@ class SummaryService:
         except Exception as e:
             logger.error(f"Lỗi AI Summary cho '{hotel_name}': {str(e)}")
             return AIReviewSummary(
+                overview= "Không thể tải tóm tắt tổng quan lúc này.",
                 pros= ["Không thể tải tóm tắt ưu điểm lúc này."],
                 cons= ["Không thể tải tóm tắt nhược điểm lúc này."],
                 notes= "Hệ thống AI đang bận, vui lòng thử lại sau."

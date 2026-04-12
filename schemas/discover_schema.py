@@ -38,6 +38,7 @@ class AnalyzedReview(BaseModel):
     
 # Tóm tắt AI cho review
 class AIReviewSummary(BaseModel):
+    overview: str
     pros: list[str]
     cons: list[str]
     notes: str
@@ -64,7 +65,6 @@ class DiscoverHotel(BaseModel):
     raw_rating: float
     amenities: list[str]
     description: str
-    ai_overview: str
     ai_score: float   
     
     # MỚI
