@@ -6,12 +6,19 @@ from api.health import health_router
 from api.discover import discover_router
 from core.database import firebase_manager
 from core.exceptions import AppException
+from mock_data.virtual_review import virtual_review_manager
 from loguru import logger
 
 # Khởi tạo các thành phần cần thiết
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Khởi tạo Firebase
     firebase_manager.initialize() 
+    # Khởi tạo Virtual Review 
+    try:
+        virtual_review_manager.initialize("mock_data/user_reviews.csv")
+    except FileNotFoundError as e:
+        logger.error(f"Error initializing virtual review manager: {e}")
     yield
 
 app = FastAPI(lifespan=lifespan)

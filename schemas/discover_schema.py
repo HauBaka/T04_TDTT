@@ -12,6 +12,10 @@ class DiscoverRequest(BaseModel):
     adults: int
     personality: str
 
+class UserReview(BaseModel):
+    text: str
+    raw_stars: float
+
 class DiscoverHotel(BaseModel):
     name: str
     address: str
@@ -21,5 +25,7 @@ class DiscoverHotel(BaseModel):
     description: str
     ai_overview: str
     ai_score: float
+
+    user_reviews: list[UserReview] = []
 class DiscoverResponse(BaseModel):
     data: list[DiscoverHotel] # Danh sách các khách sạn phù hợp, mỗi khách sạn là một dict với thông tin chi tiết
