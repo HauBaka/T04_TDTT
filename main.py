@@ -57,4 +57,3 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 async def root():
     logger.info("Root endpoint accessed")
     return {"message": "Hello World"}
-
