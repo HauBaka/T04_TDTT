@@ -3,8 +3,12 @@ from datetime import datetime, timezone, timedelta
 from schemas.discover_schema import DiscoverRequest, DiscoverHotel, AIReviewSummary
 from services.sentiment_service import sentiment_service
 from services.summary_service import SummaryService
+from mock_data.virtual_review import virtual_review_manager
+from externals.SerpAPI import serp_api
+from repositories.hotel_repo import hotel_repo
 import asyncio
 from loguru import logger
+
 REAL_RATING_CACHE_EXPIRATION_DAYS=7
 SUMMARY_CACHE_EXPIRATION_DAYS = 14 
 
@@ -16,11 +20,24 @@ class DiscoverService:
 
     async def raw_search(self) -> list[DiscoverHotel]:
         """Gọi SerpAPI để lấy dữ liệu thô dựa trên payload đầu vào"""
-        return []
-    async def hard_filter(self) -> list[DiscoverHotel]:
-        """Lọc dữ liệu thô theo các tiêu chí cứng"""
-        return []
-    
+        result = await serp_api.search_places(
+            query=self.payload.address,
+            language=self.payload.language,
+            check_in_date=self.payload.check_in.strftime("%Y-%m-%d"),
+            check_out_date=self.payload.check_out.strftime("%Y-%m-%d"),
+            adults=self.payload.adults,
+            children=self.payload.children,
+            min_price=self.payload.min_price,
+            max_price=self.payload.max_price,
+        )
+        return result.data or []
+      
+    async def get_reviews(self, hotels: list[DiscoverHotel]):
+        """Lấy review cho từng khách sạn"""
+        for hotel in hotels:
+            virtual_review_manager.add_random_reviews(hotel, min_count=25, max_count=50)
+        # XXX: hơi chậm
+        
     async def process_places_real_rating(self, filtered_places: list[DiscoverHotel]):
         """
         Xử lý điểm đánh giá thực tế cho từng khách sạn trong danh sách đã lọc. Cụ thể:
@@ -147,12 +164,12 @@ class DiscoverService:
                 # Cập nhật kết quả AI vào Place
                 place.ai_summary = summary
                 place.ai_summary_expiration_date = new_expiration_date
-
-    async def execute_discover_pipeline(self, payload: DiscoverRequest) -> list[DiscoverHotel]:
+        
+    async def execute_discover_pipeline(self) -> list[DiscoverHotel]:
         """Thực thi pipeline tìm kiếm"""
         raw_results = await self.raw_search()
-        filtered_results = await self.hard_filter()
-        await self.process_places_real_rating(filtered_results)
-        await self.process_places_ai_summary(filtered_results)
         # ...
-        return []
+        await self.process_places_real_rating(raw_results)
+        await self.process_places_ai_summary(raw_results)
+        await hotel_repo.upsert_hotels(raw_results)  # Lưu kết quả vào Firestore
+        return raw_results
