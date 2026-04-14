@@ -29,8 +29,8 @@ class SummaryService:
         # Sắp xếp theo Trust Weight giảm dần (Lấy những review uy tín nhất lên đầu)
         valid_reviews.sort(key=lambda x: x.trust_weight, reverse=True)
                  
-        # Chỉ lấy text của top 30 review xịn nhất để tiết kiệm Token
-        trusted_texts = [rev.text for rev in valid_reviews[:30]]
+        # Chỉ lấy text của top 5 review xịn nhất để tiết kiệm Token
+        trusted_texts = [rev.text for rev in valid_reviews[:5]]
         # Nếu không có review nào đủ tin cậy, vẫn phải đảm bảo context_reviews có giá trị để prompt không bị lỗi
         context_reviews = "\n- ".join(trusted_texts) if trusted_texts else "Chưa có đánh giá chi tiết."
 
