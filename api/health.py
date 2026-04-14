@@ -6,4 +6,4 @@ health_router = APIRouter()
 
 @health_router.get("/health", response_model=ResponseSchema)
 async def health_check():
-    return ResponseSchema(data=healthService.info())
+    return ResponseSchema(data=await healthService.info())

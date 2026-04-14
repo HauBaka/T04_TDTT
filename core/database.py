@@ -1,5 +1,5 @@
 import firebase_admin
-from firebase_admin import credentials, firestore
+from firebase_admin import credentials, firestore_async
 from core.settings import settings
 import os
 
@@ -15,18 +15,18 @@ class FirebaseManager:
             cred = credentials.Certificate(settings.FIREBASE_CREDENTIAL)
             firebase_admin.initialize_app(cred)
             
-        self._db = firestore.client()
+        self._db = firestore_async.client()
 
     def get_db(self):
         if self._db is None:
             raise RuntimeError("Database not initialized.")
         return self._db
 
-    def get_status(self) -> str:
+    async def get_status(self) -> str:
         if self._db is None:
             return "disconnected"
         try:
-            self._db.collection("dummy").document("ping").get()
+            await self._db.collection("dummy").document("ping").get()
             return "connected"
         except Exception as e:
             return f"error: {str(e)}"

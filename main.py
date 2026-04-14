@@ -9,6 +9,8 @@ from core.exceptions import AppException
 from mock_data.virtual_review import virtual_review_manager
 from loguru import logger
 
+import core.http_client as http_client
+import httpx
 # Khởi tạo các thành phần cần thiết
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -19,7 +21,11 @@ async def lifespan(app: FastAPI):
         virtual_review_manager.initialize("mock_data/user_reviews.csv")
     except FileNotFoundError as e:
         logger.error(f"Error initializing virtual review manager: {e}")
+    http_client._http_client = httpx.AsyncClient(timeout=10.0)
     yield
+
+    if http_client._http_client:
+        await http_client._http_client.aclose()
 
 app = FastAPI(lifespan=lifespan)
 # Đăng ký router
@@ -48,15 +54,21 @@ async def general_exception_handler(request: Request, exc: Exception):
             "data": None
         }
     )
-@app.exception_handler(RequestValidationError) # Xử lý lỗi validation
+@app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    logger.error(f"Validation Error: {exc.errors()}")
+    clean_errors = []
+    for error in exc.errors():
+        clean_errors.append({
+            "field": " -> ".join([str(x) for x in error.get("loc", [])]),
+            "message": error.get("msg")
+        })
+
     return JSONResponse(
         status_code=422,
         content={
-            "status": "error",
-            "message": "Invalid input data.",
-            "data": exc.errors()
+            "status_code": 422,
+            "message": "Validation Error",
+            "errors": clean_errors
         }
     )
 # default route
@@ -64,4 +76,3 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 async def root():
     logger.info("Root endpoint accessed")
     return {"message": "Hello World"}
-
