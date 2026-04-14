@@ -6,30 +6,32 @@ from typing import Annotated
 # CÁC CLASS REQUEST & VALIDATION
 # ==============================
 class DiscoverRequest(BaseModel):
-    language: str
+    language: str # để tạm
     address: str
     check_in: datetime
     check_out: datetime
     min_price: int
     max_price: int
-    amenities: list[str] = []
-    children: list[Annotated[int, Field(ge=1, le=17)]] = [] # Tuổi của trẻ em, ví dụ: [5, 8] nếu có 2 trẻ em 5 và 8 tuổi
+    children: list[Annotated[int, Field(ge=1, le=17)]] | None = None  # Tuổi của trẻ em, ví dụ: [5, 8] nếu có 2 trẻ em 5 và 8 tuổi
     adults: int
-    personality: str
+    personality: str # để tạm
     
     # Thêm ràng buộc
     @model_validator(mode='after')
     def validate_cross_fields(self) -> 'DiscoverRequest':
+        # Đổi timezone của check_in và check_out về UTC để so sánh chính xác hơn
+        self.check_in = self.check_in.astimezone(timezone.utc)
+        self.check_out = self.check_out.astimezone(timezone.utc)
         # 1. Ràng buộc ngày tháng: today <= check_in < check_out
         if self.check_in < datetime.now(timezone.utc):
-            raise ValueError("Ngày check_in không được trong quá khứ (today <= check_in).")
+            raise ValueError("check_in must be today or later.")
         
         if self.check_in >= self.check_out:
-            raise ValueError("Ngày check_in phải diễn ra trước ngày check_out (check_in < check_out).")
+            raise ValueError("check_in must be before check_out.")
             
         # 2. Ràng buộc giá: min_price < max_price
         if self.min_price >= self.max_price:
-            raise ValueError("Giá trị min_price phải nhỏ hơn max_price.")
+            raise ValueError("min_price must be less than max_price.")
             
         return self
 
@@ -77,16 +79,15 @@ class BookingSource(BaseModel):
 
 # Phương tiện di chuyển đến địa điểm lân cận
 class Transportation(BaseModel):
-    type: str
-    duration: str
-    
+    type: str | None = None
+    distance: str | None = None
+    duration: str | None = None
+
 # Địa điểm lân cận
 class NearbyPlace(BaseModel):
     category: str | None = None
     name: str
     thumbnail: str | None = None
-    rating: float | None = None
-    reviews: int | None = None
     description: str | None = None
     gps_coordinates: GPSCoordinates | None = None
     transportations: list[Transportation] = [] # Danh sách các phương tiện di chuyển đến địa điểm này
@@ -97,7 +98,7 @@ class DiscoverHotel(BaseModel):
     name: str
     description: str | None = None
     link: str | None = None
-    address: str
+    address: str | None = None
     phone: str | None = None
     gps_coordinates: GPSCoordinates | None = None
     nearby_places: list[NearbyPlace] = [] # Danh sách các địa điểm lân cận
@@ -106,7 +107,7 @@ class DiscoverHotel(BaseModel):
     check_in_time: str | None = None
     check_out_time: str | None = None
 
-    price: int # json_data -> rate_per_night.extracted_lowest
+    price: float # json_data -> rate_per_night.extracted_lowest
     deal: str | None = None
     booking_sources: list[BookingSource] = [] # Danh sách giá ở các trang khác
 
@@ -121,12 +122,14 @@ class DiscoverHotel(BaseModel):
     # Ai phân tích lại
     ai_overview: str | None = None
     ai_score: float = 0.0
-    trust_weight: float       # Trọng số tin cậy tổng thể của khách sạn (0.0 -> 1.0)
+    trust_weight: float  = 0.0     # Trọng số tin cậy tổng thể của khách sạn (0.0 -> 1.0)
     analyzed_reviews: list[AnalyzedReview] = [] # Danh sách các review đã được phân tích
-    ai_score_expiration_date: datetime | None   # ISO format date string cho ngày hết hạn của ai_score
-    ai_summary_expiration_date: datetime | None # ISO format date string cho ngày hết hạn của ai_summary
-    ai_summary: AIReviewSummary | None      # Tóm tắt do AI tạo ra, có thể hết hạn và cần được làm mới
+    ai_score_expiration_date: datetime | None = None  # ISO format date string cho ngày hết hạn của ai_score
+    ai_summary_expiration_date: datetime | None = None # ISO format date string cho ngày hết hạn của ai_summary
+    ai_summary: AIReviewSummary | None = None     # Tóm tắt do AI tạo ra, có thể hết hạn và cần được làm mới
 
+    # updates
+    last_updated: datetime | None = None
 
 class DiscoverResponse(BaseModel):
     data: list[DiscoverHotel] # Danh sách các khách sạn phù hợp, mỗi khách sạn là một dict với thông tin chi tiết

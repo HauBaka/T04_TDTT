@@ -27,7 +27,7 @@ class GeminiClient:
                 "content": "connected" if  model_info and hasattr(model_info, 'name') else "not available"
             }
         except Exception as e:
-            logger.error(beauty_json({"Error checking Gemini API status": str(e)}))
+            logger.error(beauty_json({"Error checking Gemini API status": getattr(e, 'message', str(e))}))
             return {
                 "model_name": self.default_model,
                 "content": "Not available"
