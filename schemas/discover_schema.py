@@ -49,9 +49,10 @@ class AnalyzedReview(BaseModel):
     
 # Tóm tắt AI cho review
 class AIReviewSummary(BaseModel):
-    pros: list[str]
-    cons: list[str]
-    notes: str
+    overview: str | None = None
+    pros: list[str] | None = None
+    cons: list[str] | None = None
+    notes: str | None = None
 
 # Review gốc từ người dùng
 class UserReview(BaseModel):
@@ -92,10 +93,6 @@ class NearbyPlace(BaseModel):
     gps_coordinates: GPSCoordinates | None = None
     transportations: list[Transportation] = [] # Danh sách các phương tiện di chuyển đến địa điểm này
 
-class UserReview(BaseModel):
-    text: str
-    raw_stars: float
-
 class DiscoverHotel(BaseModel):
     # thông itn cơ bản
     property_token: str | None = None
@@ -124,7 +121,6 @@ class DiscoverHotel(BaseModel):
     user_reviews: list[UserReview] = [] # Danh sách review gốc (chưa phân tích)
 
     # Ai phân tích lại
-    ai_overview: str | None = None
     ai_score: float = 0.0
     trust_weight: float  = 0.0     # Trọng số tin cậy tổng thể của khách sạn (0.0 -> 1.0)
     analyzed_reviews: list[AnalyzedReview] = [] # Danh sách các review đã được phân tích
