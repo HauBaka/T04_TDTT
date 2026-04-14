@@ -10,7 +10,7 @@ discover_router = APIRouter()
 async def perform(payload: DiscoverRequest):
     try:
         discover_service = DiscoverService(payload)
-        results = await discover_service.execute_discover_pipeline(payload)
+        results = await discover_service.execute_discover_pipeline()
         return ResponseSchema(data=results)
     except AppException as e:
         raise HTTPException(status_code=e.status_code, detail=e.message)

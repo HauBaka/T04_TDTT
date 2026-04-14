@@ -168,8 +168,8 @@ class DiscoverService:
     async def execute_discover_pipeline(self) -> list[DiscoverHotel]:
         """Thực thi pipeline tìm kiếm"""
         raw_results = await self.raw_search()
-        # ...
+        await self.get_reviews(raw_results)
         await self.process_places_real_rating(raw_results)
-        await self.process_places_ai_summary(raw_results)
+        # await self.process_places_ai_summary(raw_results) XXX: quá nghèo để có thể gọi AI Summary, tạm thời để sau
         await hotel_repo.upsert_hotels(raw_results)  # Lưu kết quả vào Firestore
         return raw_results
