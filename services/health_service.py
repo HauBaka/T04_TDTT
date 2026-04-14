@@ -8,13 +8,15 @@ class HealthService:
     def __init__(self):
         self.start_time = time.time()
 
-    def info(self) -> dict:
+    async def info(self) -> dict:
+        serp = await serp_api.get_status()
+        gemini = gemini_client.get_status()
         return {
                 "start_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.start_time)),
                 "up_time": time.strftime("%H:%M:%S", time.gmtime(time.time() - self.start_time)),
-                "serp_api": serp_api.get_status(),
-                "gemini_api": gemini_client.get_status(),
-                "database": firebase_manager.get_status()
+                "serp_api": serp,
+                "gemini_api": gemini,
+                "database": await firebase_manager.get_status()
             }
 
 
