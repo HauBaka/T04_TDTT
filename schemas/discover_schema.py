@@ -92,6 +92,10 @@ class NearbyPlace(BaseModel):
     gps_coordinates: GPSCoordinates | None = None
     transportations: list[Transportation] = [] # Danh sách các phương tiện di chuyển đến địa điểm này
 
+class UserReview(BaseModel):
+    text: str
+    raw_stars: float
+
 class DiscoverHotel(BaseModel):
     # thông itn cơ bản
     property_token: str | None = None
