@@ -63,6 +63,14 @@ class UserReview(BaseModel):
 # CÁC CLASS DATA KHÁC
 # ==========================================
 
+class WeatherInfo(BaseModel):
+    """Schema lưu trữ thông tin thời tiết tại điểm đến"""
+    
+    condition: str # trạng thái thời tiết (VD: Trời nắng, Mưa to, Nhiều mây)
+    temp_c: float # nhiệt độ thực tế
+    temp_feels_like: float # nhiệt độ cảm nhận thực tế
+    rain_chance: int # Xác suất có mưa
+
 class GPSCoordinates(BaseModel):
     latitude: float
     longitude: float

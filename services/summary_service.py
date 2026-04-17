@@ -3,7 +3,7 @@ import logging
 import re
 import asyncio
 from externals.Gemini import gemini_client
-from schemas.discover_schema import AnalyzedReview, NearbyPlace, AIReviewSummary
+from schemas.discover_schema import AnalyzedReview, NearbyPlace, AIReviewSummary, WeatherInfo
 import textwrap
 logger = logging.getLogger(__name__)
 
@@ -16,7 +16,8 @@ class SummaryService:
                 analyzed_reviews: list[AnalyzedReview], 
                 hotel_name: str,
                 amenities: list[str] = [],
-                nearby_places: list[NearbyPlace] = []
+                nearby_places: list[NearbyPlace] = [],
+                weather: WeatherInfo=None
             ) -> AIReviewSummary:
         
         """
@@ -57,16 +58,29 @@ class SummaryService:
             context_nearby = "\n- ".join(context_nearby_list)
         else:
             context_nearby = "Không có dữ liệu vị trí."
+        
+        # Xử lí thời tiết
+        if weather:
+            context_weather = (
+                f"- Trạng thái: {weather.condition}\n"
+                f"- Nhiệt độ: {weather.temp_c}°C (Cảm nhận như: {weather.temp_feels_like}°C)\n"
+                f"- Xác suất mưa: {weather.rain_chance}%"
+            )
+        else:
+            context_weather = "Không có thông tin thời tiết."
 
         # 3. Xây dựng prompt
         prompt = textwrap.dedent(f"""
         Bạn là một Chuyên gia Đánh giá Khách sạn độc lập. Nhiệm vụ của bạn là tổng hợp cái nhìn khách quan nhất về khách sạn "{hotel_name}" dựa trên 3 nguồn dữ liệu dưới đây.
 
         [RÀNG BUỘC PHÂN TÍCH - TUYỆT ĐỐI TUÂN THỦ]:
-        1. TỔNG HỢP ĐA CHIỀU: Ghép nối khéo léo Đánh giá + Tiện ích + Vị trí. (VD: "Phòng hơi nhỏ nhưng bù lại vị trí đắc địa, chỉ mất 4 phút đi bộ ra Chùa Ngọc Hoàng").
-        2. XỬ LÝ MÂU THUẪN: Nếu khách khen chê trái chiều về cùng 1 vấn đề, hãy dùng từ ngữ trung lập (VD: "Có ý kiến trái chiều về thái độ nhân viên").
-        3. HIỂU TỪ LÓNG (Slang): Tự động dịch các từ lóng mạng Việt Nam (xịn xò, chê mạnh, dơ, okela...) thành ngữ nghĩa chuẩn.
-        4. ZERO HALLUCINATION: Bắt buộc chỉ dùng dữ liệu được cung cấp. Nếu dữ liệu quá ít, hãy điền: "Chưa có đủ thông tin".
+        1. TỔNG HỢP ĐA CHIỀU: Ghép nối khéo léo Đánh giá + Tiện ích + Thời tiết + Vị trí. (VD: "Phòng hơi nhỏ nhưng bù lại vị trí đắc địa, chỉ mất 4 phút đi bộ ra Chùa Ngọc Hoàng").
+        2. TƯ VẤN THEO THỜI TIẾT: Dựa trên dự báo thời tiết, hãy đưa ra lời khuyên thực tế. 
+           - Nếu xác suất mưa cao (>60%): Hãy nhấn mạnh các tiện ích trong nhà (Indoor), Spa, hoặc nhà hàng.
+           - Nếu nắng nóng (>32°C): Hãy nhấn mạnh về hồ bơi, điều hòa hoặc các điểm giải trí gần nước.
+        3. XỬ LÝ MÂU THUẪN: Nếu khách khen chê trái chiều về cùng 1 vấn đề, hãy dùng từ ngữ trung lập (VD: "Có ý kiến trái chiều về thái độ nhân viên").
+        4. HIỂU TỪ LÓNG (Slang): Tự động dịch các từ lóng mạng Việt Nam (xịn xò, chê mạnh, dơ, okela...) thành ngữ nghĩa chuẩn.
+        5. ZERO HALLUCINATION: Bắt buộc chỉ dùng dữ liệu được cung cấp. Nếu dữ liệu quá ít, hãy điền: "Chưa có đủ thông tin".
 
         [RÀNG BUỘC ĐẦU RA - QUAN TRỌNG NHẤT]:
         - Bạn là một API Backend.
@@ -92,6 +106,9 @@ class SummaryService:
 
         [3. ĐỊA ĐIỂM LÂN CẬN (Khoảng cách)]:
         {context_nearby}
+        
+        [4. DỰ BÁO THỜI TIẾT TẠI ĐIỂM ĐẾN]:
+        {context_weather}
         """
         )
 

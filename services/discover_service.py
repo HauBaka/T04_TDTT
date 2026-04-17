@@ -5,6 +5,7 @@ from services.sentiment_service import sentiment_service
 from services.summary_service import SummaryService
 from mock_data.virtual_review import virtual_review_manager
 from externals.SerpAPI import serp_api
+from externals.WeatherOpenMeteo import weather_open_meteo
 from repositories.hotel_repo import hotel_repo
 import asyncio
 from loguru import logger
@@ -120,6 +121,9 @@ class DiscoverService:
             
             hotel_name = place.name 
             
+            # chỗ này lấy thông tin thời tiết
+            weather=weather_open_meteo.search(queries={})
+            
             # 2. Kiểm tra đã có ai_summary và ai_summary_expiration_date chưa
             ai_summary = place.ai_summary
             expiration_date = place.ai_summary_expiration_date # Sử dụng datetime
@@ -134,7 +138,8 @@ class DiscoverService:
                 analyzed_reviews=user_reviews,
                 hotel_name=hotel_name,
                 amenities=amenities,
-                nearby_places=nearby_places
+                nearby_places=nearby_places,
+                weather=weather
             )
             ai_tasks.append(task)
             places_needing_summary.append(place)
