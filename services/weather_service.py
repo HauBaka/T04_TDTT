@@ -19,7 +19,7 @@ class WeatherService:
         elif not from_date:
             from_date=datetime.now().strftime("%Y-%m-%d")
         elif not to_date:
-            to_date=(datetime.now() + timedelta(days=2)).strftime("%Y-%m-%d")
+            to_date=(datetime.strptime(from_date, "%Y-%m-%d") + timedelta(days=2)).strftime("%Y-%m-%d")
         return await self.weather_api.search(lat, lng, from_date, to_date)
 
     def get_weather_alert_flags(self, daily_weathers: list[WeatherInfo]) -> list[str]:
