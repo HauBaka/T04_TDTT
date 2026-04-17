@@ -133,8 +133,8 @@ class DiscoverService:
             
             lat = place.gps_coordinates.latitude if place.gps_coordinates else 0.0
             lng = place.gps_coordinates.longitude if place.gps_coordinates else 0.0
-            start_date = self.payload.check_in.strftime("%Y-%m-%d")
-            end_date = self.payload.check_out.strftime("%Y-%m-%d")
+            start_date = self.payload.check_in.strftime("%Y-%m-%d") if self.payload.check_in else None
+            end_date = self.payload.check_out.strftime("%Y-%m-%d") if self.payload.check_out else None
             
             # lấy dữ liệu thời tiết
             weather = await self.weather_service.get_weather(
