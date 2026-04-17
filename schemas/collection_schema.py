@@ -33,10 +33,12 @@ class CollectionPrivate(CollectionPublic):
     pass
 
 class CollectionCreateRequest(BaseModel):
-    id: str
+    name: str
+    description: str | None = None
+    visibility: CollectionVisibility = CollectionVisibility.PUBLIC
+    thumbnail_url: str | None = None
 
 class CollectionUpdateRequest(BaseModel):
-    id: str
     name: str | None = None
     description: str | None = None
     collaborators: list[CollectionCollaborator] | None = None

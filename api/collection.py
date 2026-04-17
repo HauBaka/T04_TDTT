@@ -15,12 +15,12 @@ async def get_collection(collection_id: str, token: str | None = None):
     """Lấy thông tin của một collection cụ thể."""
     pass
 
-@collection_router.patch("/collections", response_model=CollectionResponse)
-async def update_collection(collection_request: CollectionUpdateRequest, token: str | None = None):
+@collection_router.patch("/collections/{collection_id}", response_model=CollectionResponse)
+async def update_collection(collection_id: str, collection_request: CollectionUpdateRequest, token: str | None = None):
     """Cập nhật thông tin của một collection cụ thể."""
     pass
 
-@collection_router.delete("/collections", response_model=ResponseSchema)
+@collection_router.delete("/collections/{collection_id}", response_model=ResponseSchema)
 async def delete_collection(collection_id: str, token: str | None = None):
     """Xóa một collection cụ thể."""
     pass
