@@ -3,6 +3,7 @@ from datetime import datetime, timezone, timedelta
 from schemas.discover_schema import DiscoverRequest, DiscoverHotel, AIReviewSummary
 from services.sentiment_service import sentiment_service
 from services.summary_service import SummaryService
+from services.weather_service import WeatherService
 from mock_data.virtual_review import virtual_review_manager
 from externals.SerpAPI import serp_api
 from externals.WeatherOpenMeteo import weather_open_meteo
@@ -18,6 +19,7 @@ class DiscoverService:
         self.payload = payload
         self.sentiment_service = sentiment_service
         self.summary_service = SummaryService()
+        self.weather_service = WeatherService()
 
     async def raw_search(self) -> list[DiscoverHotel]:
         """Gọi SerpAPI để lấy dữ liệu thô dựa trên payload đầu vào"""
@@ -121,9 +123,6 @@ class DiscoverService:
             
             hotel_name = place.name 
             
-            # chỗ này lấy thông tin thời tiết
-            weather=weather_open_meteo.search(queries={})
-            
             # 2. Kiểm tra đã có ai_summary và ai_summary_expiration_date chưa
             ai_summary = place.ai_summary
             expiration_date = place.ai_summary_expiration_date # Sử dụng datetime
@@ -131,6 +130,19 @@ class DiscoverService:
             if ai_summary and expiration_date and now < expiration_date:
                 # Nếu đã có tóm tắt và còn hạn, không cần gọi AI
                 continue
+            
+            lat = place.gps_coordinates.latitude if place.gps_coordinates else 0.0
+            lng = place.gps_coordinates.longitude if place.gps_coordinates else 0.0
+            start_date = self.payload.check_in.strftime("%Y-%m-%d")
+            end_date = self.payload.check_out.strftime("%Y-%m-%d")
+            
+            # lấy dữ liệu thời tiết
+            weather = await self.weather_service.get_weather(
+                lat=lat,
+                lng=lng,
+                from_date=start_date,
+                to_date=end_date,
+            )
 
             # Chuẩn bị luồng gọi AI nếu cần thiết
             # Tạo coroutine cho việc gọi AI Summary, nhưng chưa chạy ngay mà sẽ chạy cùng lúc ở bước sau để tối ưu hiệu suất

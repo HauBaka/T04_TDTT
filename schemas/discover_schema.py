@@ -68,7 +68,6 @@ class WeatherInfo(BaseModel):
     
     condition: str # trạng thái thời tiết (VD: Trời nắng, Mưa to, Nhiều mây)
     temp_c: float # nhiệt độ thực tế
-    temp_feels_like: float # nhiệt độ cảm nhận thực tế
     rain_chance: int # Xác suất có mưa
 
 class GPSCoordinates(BaseModel):

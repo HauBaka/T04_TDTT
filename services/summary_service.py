@@ -3,6 +3,7 @@ import logging
 import re
 import asyncio
 from externals.Gemini import gemini_client
+from services.weather_service import WeatherService
 from schemas.discover_schema import AnalyzedReview, NearbyPlace, AIReviewSummary, WeatherInfo
 import textwrap
 logger = logging.getLogger(__name__)
@@ -10,6 +11,7 @@ logger = logging.getLogger(__name__)
 class SummaryService:
     def __init__(self):
         self.ai_client = gemini_client
+        self.weather_service = WeatherService()
 
     async def generate_places_summary(
                 self, 
@@ -17,11 +19,11 @@ class SummaryService:
                 hotel_name: str,
                 amenities: list[str] = [],
                 nearby_places: list[NearbyPlace] = [],
-                weather: WeatherInfo=None
+                weather: list[WeatherInfo] = None
             ) -> AIReviewSummary:
         
         """
-        Multi-source RAG: Tóm tắt dựa trên Reviews, Tiện ích và Vị trí.
+        Multi-source RAG: Tóm tắt dựa trên Reviews, Tiện ích, Thời tiết và Vị trí.
         """
         # Lọc & Sắp xếp Reviews (Retrieval)
         # Chỉ lấy review có độ tin cậy > 0.5
@@ -59,15 +61,11 @@ class SummaryService:
         else:
             context_nearby = "Không có dữ liệu vị trí."
         
-        # Xử lí thời tiết
+        # Xử lý weather để đưa vào prompt
         if weather:
-            context_weather = (
-                f"- Trạng thái: {weather.condition}\n"
-                f"- Nhiệt độ: {weather.temp_c}°C (Cảm nhận như: {weather.temp_feels_like}°C)\n"
-                f"- Xác suất mưa: {weather.rain_chance}%"
-            )
+            context_weather= await self.weather_service.summarize_trip_weather(weather)
         else:
-            context_weather = "Không có thông tin thời tiết."
+            context_weather="Chưa có dữ liệu thời tiết."
 
         # 3. Xây dựng prompt
         prompt = textwrap.dedent(f"""
@@ -75,9 +73,7 @@ class SummaryService:
 
         [RÀNG BUỘC PHÂN TÍCH - TUYỆT ĐỐI TUÂN THỦ]:
         1. TỔNG HỢP ĐA CHIỀU: Ghép nối khéo léo Đánh giá + Tiện ích + Thời tiết + Vị trí. (VD: "Phòng hơi nhỏ nhưng bù lại vị trí đắc địa, chỉ mất 4 phút đi bộ ra Chùa Ngọc Hoàng").
-        2. TƯ VẤN THEO THỜI TIẾT: Dựa trên dự báo thời tiết, hãy đưa ra lời khuyên thực tế. 
-           - Nếu xác suất mưa cao (>60%): Hãy nhấn mạnh các tiện ích trong nhà (Indoor), Spa, hoặc nhà hàng.
-           - Nếu nắng nóng (>32°C): Hãy nhấn mạnh về hồ bơi, điều hòa hoặc các điểm giải trí gần nước.
+        2. TƯ VẤN THỜI TIẾT: Dựa trên dự báo chuyến đi, hãy đưa ra lời khuyên thực tế (Ưu tiên tiện ích trong nhà nếu mưa; Ưu tiên hồ bơi/biển nếu nắng nóng).
         3. XỬ LÝ MÂU THUẪN: Nếu khách khen chê trái chiều về cùng 1 vấn đề, hãy dùng từ ngữ trung lập (VD: "Có ý kiến trái chiều về thái độ nhân viên").
         4. HIỂU TỪ LÓNG (Slang): Tự động dịch các từ lóng mạng Việt Nam (xịn xò, chê mạnh, dơ, okela...) thành ngữ nghĩa chuẩn.
         5. ZERO HALLUCINATION: Bắt buộc chỉ dùng dữ liệu được cung cấp. Nếu dữ liệu quá ít, hãy điền: "Chưa có đủ thông tin".
@@ -91,10 +87,10 @@ class SummaryService:
 
         Cấu trúc JSON đầu ra:
         {{
-            "overview": "Viết 1 đoạn văn ngắn (2-3 câu) tóm tắt tổng quan nhất về chất lượng, vị trí và trải nghiệm tại khách sạn này.",
+            "overview": "Viết 1 đoạn văn ngắn (2-3 câu) tóm tắt tổng quan nhất về chất lượng, vị trí, thời tiết và trải nghiệm tại khách sạn này.",
             "pros": ["Ưu điểm 1", "Ưu điểm 2"],
             "cons": ["Nhược điểm 1", "Nhược điểm 2"],
-            "notes": "1 câu tóm tắt vibe chung, phốt (nếu có), hoặc lời khuyên chân thành cho người sắp đặt phòng."
+            "notes": "1 câu tóm tắt vibe chung, phốt (nếu có), cảnh báo thời tiết hoặc lời khuyên chân thành cho người sắp đặt phòng."
         }}
 
         --- DỮ LIỆU ĐẦU VÀO ---
