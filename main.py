@@ -4,6 +4,9 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from api.health import health_router
 from api.discover import discover_router
+from api.auth import auth_router
+from api.user import user_router
+from api.collection import collection_router
 from core.database import firebase_manager
 from core.exceptions import AppException
 from mock_data.virtual_review import virtual_review_manager
@@ -29,8 +32,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 # Đăng ký router
-app.include_router(health_router, prefix="/api/v1", tags=["health"])
-app.include_router(discover_router, prefix="/api/v1", tags=["discover"])
+app.include_router(health_router, tags=["health"])
+app.include_router(discover_router, tags=["discover"])
+app.include_router(auth_router, tags=["auth"])
+app.include_router(user_router, tags=["user"])
+app.include_router(collection_router, tags=["collection"])
 # Xử lý các lỗi
 @app.exception_handler(AppException) # Xử lý lỗi ứng dụng
 async def app_exception_handler(request: Request, exc: AppException):
