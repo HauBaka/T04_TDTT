@@ -9,8 +9,15 @@ class UserRepository:
     
     async def get_user(self, uid: str) -> dict | None:
         pass
-    async def create_user(self, user_data: dict) -> str | None:
-        pass
+    async def create_user(self, user_data: dict) -> bool:
+        # [Nhánh Not Exists]: Lưu thông tin user mới
+        db = self._get_db()
+        uid = user_data.get("uid")
+
+        if not uid:
+            return False
+        await db.collection(self.user_collection).document(uid).set(user_data)
+        return True
         
     async def update_user(self, uid: str, update_data: dict) -> bool | None:
         pass
