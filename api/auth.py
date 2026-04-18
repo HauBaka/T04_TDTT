@@ -10,6 +10,6 @@ async def authenticate(auth_request: AuthRequest):
     try:
         auth_service = AuthenticationService(auth_request.token)
         
-        return await auth_service.doSomething()
+        return await auth_service.authenticate_user()
     except AppException as e:
         raise HTTPException(status_code=e.status_code, detail=e.message)
