@@ -24,6 +24,11 @@ class CollectionPublic(BaseModel):
     updated_at: datetime
     collaborators: list[CollectionCollaborator] = []
     places: list[str] = []
+    
+    # Các tag do người dùng gắn cho bộ sưu tập
+    tags: list[str] = Field(default_factory=list)
+    # Ghi chú của người dùng về bộ sưu tập
+    notes: str | None = None
     visibility: CollectionVisibility = CollectionVisibility.PUBLIC
 
 class CollectionUnlisted(CollectionPublic):
@@ -35,6 +40,8 @@ class CollectionPrivate(CollectionPublic):
 class CollectionCreateRequest(BaseModel):
     name: str
     description: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    notes: str | None = None
     visibility: CollectionVisibility = CollectionVisibility.PUBLIC
     thumbnail_url: str | None = None
 
@@ -43,6 +50,8 @@ class CollectionUpdateRequest(BaseModel):
     description: str | None = None
     collaborators: list[CollectionCollaborator] | None = None
     places: list[str] | None = None
+    tags: list[str] | None = None
+    notes: str | None = None
     visibility: CollectionVisibility | None = None
 
 class CollectionResponse(BaseModel):
