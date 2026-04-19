@@ -8,6 +8,7 @@ from utils.beauty_json import list_to_str
 from schemas.serpapi_schema import SerpAPIResultSchema
 from schemas.discover_schema import DiscoverHotel, GPSCoordinates, HotelImage
 import httpx
+import pygeohash as pgh
 MAX_PRICE = 10000000
 
 class SerpAPIClient:
@@ -120,7 +121,10 @@ class SerpAPIClient:
                     if "gps_coordinates" in hotel:
                         gps_coordinates = GPSCoordinates(
                             latitude=hotel["gps_coordinates"].get("latitude", 0.0),
-                            longitude=hotel["gps_coordinates"].get("longitude", 0.0)
+                            longitude=hotel["gps_coordinates"].get("longitude", 0.0),
+                            geohash=pgh.encode(hotel["gps_coordinates"].get("latitude", 0.0), \
+                                               hotel["gps_coordinates"].get("longitude", 0.0), \
+                                                precision=5)
                         )
 
                     # images
