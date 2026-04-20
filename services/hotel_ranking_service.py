@@ -9,8 +9,10 @@ from functools import lru_cache
 from datetime import datetime, timezone
 from typing import Iterable
 
+from loguru import logger
+
 from schemas.collection_schema import CollectionPublic
-from schemas.discover_schema import DiscoverHotel, WeatherInfo
+from schemas.discover_schema import DiscoverHotel, DiscoverRequest, WeatherInfo
 from schemas.hotel_ranking_schema import (
     HotelRankingItem,
     HotelRankingRequest,
@@ -24,6 +26,7 @@ from schemas.user_preference_schema import (
     UserTravelPreference,
     WeatherTolerance,
 )
+from services.user_service import user_service
 from services.semantic_encoder import semantic_text_encoder
 
 # Map tiếng anh sang tiếng việt (nếu đầu vào lỡ tiếng anh)
@@ -632,7 +635,7 @@ class HotelRankingService:
         return expanded
 
     # Tính mức trùng khớp giữa hai tập từ khóa.
-    def _keyword_overlap_score(self, keywords: list[str] | set[str], tokens: list[str] | set[str]) -> float:
+    def _keyword_overlap_score(self, keywords: Iterable[str], tokens: Iterable[str]) -> float:
         keyword_set = {self._normalize_token(item) for item in keywords if self._normalize_token(item)}
         token_set = {self._normalize_token(item) for item in tokens if self._normalize_token(item)}
         if not keyword_set:
@@ -707,7 +710,7 @@ class HotelRankingService:
         intersection = left_set.intersection(right_set)
         return len(intersection) / len(union)
     
-    # hàm này để làm gì?
+    # hàm này để làm gì? hả
     # Hàm này tính trọng số giảm dần theo thời gian cho các sự kiện hành vi của người dùng, để các tương tác gần đây có ảnh hưởng lớn hơn đến điểm lịch sử.
     def _recency_weight(self, when: datetime) -> float:
         if when.tzinfo is None:
@@ -874,3 +877,103 @@ class HotelRankingService:
     # Đổi enum phong cách chuyến đi sang nhãn dễ đọc.
     def _style_label(self, trip_style: TravelStyle) -> str:
         return self.STYLE_LABELS.get(trip_style, "chưa xác định")
+
+
+    async def rank_discovered_hotels(
+        self,
+        places: list[DiscoverHotel],
+        payload: DiscoverRequest,
+        weather_by_identity: dict[str, list[WeatherInfo]] | None = None,
+        requester_username: str | None = None,
+    ) -> list[DiscoverHotel]:
+        if not places:
+            return places
+
+        profile = UserTravelPreference()
+        collections: list[CollectionPublic] = []
+        history: list[UserBehaviorEvent] = []
+        scoring_weights: ScoringWeights | None = None
+
+        if requester_username:
+            try:
+                profile_response = await user_service.get_profile(
+                    requester_token=None,
+                    target_username=requester_username,
+                )
+                private_user = profile_response.user
+
+                profile_data = getattr(private_user, "travel_profile", None)
+                if isinstance(profile_data, UserTravelPreference):
+                    profile = profile_data
+                elif isinstance(profile_data, dict):
+                    try:
+                        profile = UserTravelPreference.model_validate(profile_data)
+                    except Exception:
+                        profile = UserTravelPreference()
+
+                collection_data = getattr(private_user, "collections", [])
+                if isinstance(collection_data, list):
+                    parsed_collections: list[CollectionPublic] = []
+                    for item in collection_data:
+                        if isinstance(item, CollectionPublic):
+                            parsed_collections.append(item)
+                        elif isinstance(item, dict):
+                            try:
+                                parsed_collections.append(CollectionPublic.model_validate(item))
+                            except Exception:
+                                continue
+                    collections = parsed_collections[:50]
+
+                history_data = getattr(private_user, "user_behavior_history", [])
+                if isinstance(history_data, list):
+                    parsed_history: list[UserBehaviorEvent] = []
+                    for event in history_data:
+                        if isinstance(event, UserBehaviorEvent):
+                            parsed_history.append(event)
+                        elif isinstance(event, dict):
+                            try:
+                                parsed_history.append(UserBehaviorEvent.model_validate(event))
+                            except Exception:
+                                continue
+                    history = parsed_history[:100]
+
+                weight_data = getattr(private_user, "scoring_weights", None)
+                if isinstance(weight_data, ScoringWeights):
+                    scoring_weights = weight_data
+                elif isinstance(weight_data, dict):
+                    try:
+                        scoring_weights = ScoringWeights.model_validate(weight_data)
+                    except Exception:
+                        scoring_weights = None
+            except Exception as exc:
+                logger.warning(f"Không tải được personalization context cho ranking: {str(exc)}")
+
+        personality_note = (payload.personality or "").strip()
+        if personality_note:
+            existing_notes = (profile.notes or "").strip()
+            profile.notes = f"{existing_notes}. {personality_note}" if existing_notes else personality_note
+
+        # trip_criteria đã được chuẩn hoá và đồng bộ trong DiscoverRequest validator.
+        trip_criteria = payload.trip_criteria.model_copy(deep=True) if payload.trip_criteria else TripSearchCriteria()
+
+        if weather_by_identity is None:
+            weather_by_identity = {}
+
+        hotel_ranking_request = HotelRankingRequest(
+            hotels=places,
+            profile=profile,
+            trip_criteria=trip_criteria,
+            weather_by_identity=weather_by_identity,
+            collections=collections,
+            history=history,
+            weights=scoring_weights,
+            limit=min(
+                payload.max_ranked_hotels if payload.max_ranked_hotels is not None else len(places),
+                len(places),
+            ),
+        )
+
+        ranked_response = await self.rank_hotels(hotel_ranking_request)
+        return [item.hotel for item in ranked_response.ranked_hotels]
+        
+hotel_ranking_service = HotelRankingService()

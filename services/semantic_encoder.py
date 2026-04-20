@@ -70,13 +70,10 @@ class SemanticTextEncoder:
         return ordered_results
 
     def similarity(self, left_text: str, right_text: str) -> float | None:
-        # Similarity is cosine(left_embedding, right_embedding).
-        left_vector = self.encode([left_text])
-        right_vector = self.encode([right_text])
-        if not left_vector or not right_vector:
+        vectors = self.encode([left_text, right_text])
+        if not vectors or len(vectors) < 2:
             return None
-
-        return self._cosine_similarity(left_vector[0], right_vector[0])
+        return self._cosine_similarity(vectors[0], vectors[1])
 
     def _ensure_loaded(self) -> None:
         if self._available is not None:
@@ -121,11 +118,9 @@ class SemanticTextEncoder:
         counts = torch.clamp(mask.sum(dim=1), min=1e-9)
         return summed / counts
 
-    def _cosine_similarity(self, left_vector: tuple[float, ...], right_vector: tuple[float, ...]) -> float:
-        left_tensor = torch.tensor(left_vector)
-        right_tensor = torch.tensor(right_vector)
-        score = torch.nn.functional.cosine_similarity(left_tensor.unsqueeze(0), right_tensor.unsqueeze(0), dim=1).item()
-        return max(0.0, min(1.0, float(score)))
+    def _cosine_similarity(self, left: tuple[float, ...], right: tuple[float, ...]) -> float:
+        dot = sum(a * b for a, b in zip(left, right))
+        return max(-1.0, min(1.0, dot))
 
 
 semantic_text_encoder = SemanticTextEncoder()

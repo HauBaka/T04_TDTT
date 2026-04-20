@@ -1,16 +1,18 @@
+import asyncio
 import logging
-from schemas.discover_schema import WeatherInfo
+from schemas.discover_schema import DiscoverHotel, WeatherInfo
 from externals.WeatherOpenMeteo import weather_open_meteo
 from datetime import datetime, timedelta
-
+from services.hotel_ranking_service import hotel_ranking_service
 logger = logging.getLogger(__name__)
 
 class WeatherService:
     def __init__(self):
         self.weather_api = weather_open_meteo
 
-    async def get_weather(self, lat: float, lng: float, from_date: str=None, to_date: str=None) -> list[WeatherInfo]:
-        if not from_date and not to_date:
+    async def get_weather(self, lat: float, lng: float, from_date: str | None = None, to_date: str | None = None) -> list[WeatherInfo]:
+        # Nếu không có from_date hoặc to_date, mặc định lấy weather cho 3 ngày từ hôm nay.
+        if from_date is None or to_date is None:
             now = datetime.now()
             # Lấy ngày hôm nay
             from_date = now.strftime("%Y-%m-%d")
@@ -37,6 +39,7 @@ class WeatherService:
         return list(flags)
 
     def summarize_trip_weather(self, daily_weathers: list[WeatherInfo]) -> str:
+
         if not daily_weathers:
             return "Chưa có thông tin dự báo thời tiết."
             
@@ -56,3 +59,62 @@ class WeatherService:
             summary += " Trời có thể có mưa rải rác, bạn nên mang theo ô/dù phòng hờ khi ra ngoài."
             
         return summary
+    
+    async def build_weather_context(self, places: list[DiscoverHotel], check_in_date: datetime, check_out_date: datetime) -> dict[str, list[WeatherInfo]]:
+        """
+        Lấy thông tin thời tiết cho từng khách sạn trong danh sách places dựa trên tọa độ GPS của khách sạn.
+        Nếu có khách sạn nào không lấy được weather riêng, sẽ dùng weather mặc định của vùng tìm kiếm.
+        """
+        # Format lại theo "YYYY-MM-DD"
+        from_date = check_in_date.strftime("%Y-%m-%d")
+        to_date = check_out_date.strftime("%Y-%m-%d")
+
+        weather_tasks = []
+        hotels_with_gps = []
+        for hotel in places:
+            if hotel.gps_coordinates is None:
+                continue
+
+            hotels_with_gps.append(hotel)
+            weather_tasks.append(
+                self.get_weather(
+                    lat=hotel.gps_coordinates.latitude,
+                    lng=hotel.gps_coordinates.longitude,
+                    from_date=from_date,
+                    to_date=to_date,
+                )
+            )
+
+        if not weather_tasks:
+            return {}
+
+        weather_results = await asyncio.gather(*weather_tasks, return_exceptions=True)
+
+        weather_by_identity: dict[str, list[WeatherInfo]] = {}
+        default_weather: list[WeatherInfo] | None = None
+
+        for hotel, weather in zip(hotels_with_gps, weather_results):
+            if isinstance(weather, Exception):
+                logger.warning(f"Không lấy được weather cho {hotel.name}: {str(weather)}")
+                continue
+
+            if not isinstance(weather, list):
+                logger.warning(f"Kết quả weather không hợp lệ cho {hotel.name}: {weather}")
+                continue
+
+            weather_key = hotel_ranking_service._hotel_weather_key(hotel)
+            weather_by_identity[weather_key] = weather
+
+            # Dùng weather thành công đầu tiên làm mặc định cho địa chỉ tìm kiếm.
+            if default_weather is None:
+                default_weather = weather
+
+        # Hotel nào thiếu weather riêng sẽ nhận weather mặc định của vùng tìm kiếm.
+        if default_weather is not None:
+            for hotel in places:
+                weather_key = hotel_ranking_service._hotel_weather_key(hotel)
+                weather_by_identity.setdefault(weather_key, default_weather)
+
+        return weather_by_identity
+
+weather_service = WeatherService()
