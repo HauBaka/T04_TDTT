@@ -7,6 +7,17 @@ class UserService:
     def __init__(self):
         self.user_repo = UserRepository()
         self.auth_service = AuthenticationService()
+
+    async def get_me(self, token: str) -> ResponseSchema:
+        requester_uid = await self.auth_service.get_uid_from_token(token)
+        user_dict = await self.user_repo.get_user(requester_uid)
+
+        if not user_dict:
+            raise NotFoundError("User not found")
+
+        username = user_dict.get("username")
+        return await self.get_profile(token, username)
+        
     async def get_profile(self, requester_token: str | None, target_username: str) -> ResponseSchema:
         target_user_dict = await self.user_repo.get_user_by_username(target_username)
         if not target_user_dict:
