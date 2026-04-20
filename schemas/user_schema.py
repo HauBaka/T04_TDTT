@@ -8,15 +8,15 @@ class UserSchema(BaseModel):
     username: str
     display_name: str
     email: str
-    avatar_url: Optional[str] = None
-    bio: Optional[str] = Field(None, max_length = 500)
+    avatar_url: str | None = None
+    bio: str | None = Field(None, max_length=500)
 
 # Không cần chỉnh bật/tắt field vì phức tạp quá
 class UserPublic(BaseModel):
     username: str
     display_name: str
-    avatar_url: Optional[str] = None
-    bio: Optional[str] = None
+    avatar_url: str | None = None
+    bio: str | None = None
 
 class UserPrivate(UserPublic):
     email: str | None = None
@@ -27,8 +27,8 @@ class UserResponse(BaseModel):
 class UserUpdateRequest(BaseModel):
     display_name: str | None = None
     email: str | None = None
-    avatar_url: Optional[str] = None
-    bio: Optional[str] = Field(None, max_length = 500)
+    avatar_url: str | None = None
+    bio: str | None = Field(None, max_length=500)
     # Có thể thêm các trường khác như avatar_url, bio, v.v.
 
 
