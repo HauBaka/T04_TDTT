@@ -23,17 +23,9 @@ class AuthService:
 @user_router.get("/me", response_model=ResponseSchema)
 async def get_me(token: str):
     try:
-        requester_uid = await user_service.auth_service.get_uid_from_token(token)
-        user_dict = await user_service.user_repo.get_user(requester_uid)
- 
-        if not user_dict:
-            return ResponseSchema(status_code=404, message="User not found", data=None)
- 
-        return await user_service.get_profile(token, user_dict.get("username"))
- 
+        return await user_service.get_me(token)
     except AppException as e:
         return ResponseSchema(status_code=e.status_code, message=e.message, data=None)
-
 
 @user_router.get("/users/{username}", response_model=ResponseSchema)
 async def get_user(username: str, token: str | None = None):
