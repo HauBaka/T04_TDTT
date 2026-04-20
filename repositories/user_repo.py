@@ -27,14 +27,13 @@ class UserRepository:
 
     async def delete_user(self, uid: str) -> bool | None:
         try:
-            pending_data = {"status": "pending_delete", "is_deleted": True}
-            await self._get_db().collection(self.user_collection).document(uid).update(pending_data)
+            await self._get_db().collection(self.user_collection).document(uid).delete()
             return True
         except Exception:
             return False
 
     async def get_user_by_username(self, username: str) -> dict | None:
-        docs = await(self._get_db().collection(self.user_collection).where("username", "==", username).limit(1).get())
+        docs = await(self._get_db().collection(self.user_collection).where("username_lower", "==", username.lower()).limit(1).get())
         for doc in docs:
             return doc.to_dict()
         return None
