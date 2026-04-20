@@ -14,7 +14,6 @@ class CollectionVisibility(str, Enum):
     UNLISTED = "unlisted"
     PRIVATE = "private"
 
-
 class CollectionPublic(BaseModel):
     id: str
     owner_uid: str
