@@ -7,7 +7,7 @@ class UserService:
     def __init__(self):
         self.user_repo = UserRepository()
         self.auth_service = AuthenticationService()
-    async def get_profile(self, requester_token: str | None, target_username: str) -> Res:
+    async def get_profile(self, requester_token: str | None, target_username: str) -> ResponseSchema:
         target_user_dict = await self.user_repo.get_user_by_username(target_username)
         if not target_user_dict:
             raise NotFoundError("User not found")
@@ -20,7 +20,7 @@ class UserService:
         user_data = UserPrivate(**target_user_dict) if is_owner else UserPublic(**target_user_dict)
  
         return ResponseSchema(status_code=200, message="Success", data=user_data)    
-    async def update_profile(self, requester_token: str, update_data: dict) -> UserResponse:
+    async def update_profile(self, requester_token: str, update_data: dict) -> ResponseSchema:
         requester_uid = await self.auth_service.get_uid_from_token(requester_token)
         #lọc bỏ các field None để không ghi đè dữ liệu cũ
         filtered_data = {k: v for k, v in update_data.items() if v is not None}
@@ -29,7 +29,7 @@ class UserService:
  
         updated_user_dict = await self.user_repo.get_user(requester_uid)
         return ResponseSchema(status_code=200, message="Profile updated successfully", data=UserPrivate(**updated_user_dict)) # Mock response    
-    async def delete_profile(self, requester_token: str) -> bool:
+    async def delete_profile(self, requester_token: str) -> ResponseSchema:
         requester_uid = await self.auth_service.get_uid_from_token(requester_token)
         await self.user_repo.delete_user(requester_uid)
         return ResponseSchema(status_code=200, message="Account deleted successfully", data=None) #mock response
