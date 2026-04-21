@@ -14,3 +14,11 @@ class ValidationError(AppException):
 class DatabaseError(AppException):
     def __init__(self, message: str = "Database connection error"):
         super().__init__(message, status_code=500)
+
+class UnauthorizedError(AppException):
+    def __init__(self, message: str = "Unauthorized"):
+        super().__init__(status_code=401, message=message)
+
+class ConflictError(AppException):
+    def __init__(self, message: str = "Conflict"):
+        super().__init__(status_code=409, message=message)
