@@ -31,7 +31,7 @@ class AuthenticationService:
                 # 4. Tạo collection "Liked" mặc định và lấy ID
                 liked_req = CollectionCreateRequest(
                     name="Liked", 
-                    description="Your liked accomodations", 
+                    description="Your liked accommodations", 
                     tags = [],
                     visibility=CollectionVisibility.PRIVATE,
                     thumbnail_url=None

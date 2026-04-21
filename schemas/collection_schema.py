@@ -73,9 +73,9 @@ class CollectionCreateRequest(BaseModel):
 class CollectionUpdateRequest(BaseModel):
     name: str | None = Field(None, min_length=3, max_length=32)
     description: str | None = Field(None, max_length=512)
-    collaborators: list[Modification] | None = None
-    places: list[Modification] | None = None
-    tags: list[Modification] | None = None
+    # collaborators: list[Modification] | None = None
+    # places: list[Modification] | None = None
+    # tags: list[Modification] | None = None
     visibility: CollectionVisibility | None = None
 
 class CollectionResponse(BaseModel):

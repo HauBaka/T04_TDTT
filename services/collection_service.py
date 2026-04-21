@@ -22,12 +22,17 @@ class CollectionService:
         if not collection:
             raise NotFoundError("Invalid collection ID.")
         
-        visibility = collection.get("visibility", CollectionVisibility.PUBLIC)
+        visibility = CollectionVisibility(collection.get("visibility", CollectionVisibility.PUBLIC.value))
         owner_uid = collection.get("owner_uid", "")
         collaborators = collection.get("collaborators", [])
 
         if visibility == CollectionVisibility.PRIVATE:
-            if requester_id != owner_uid and requester_id not in collaborators:
+            collaborator_uids = [
+                c.get("uid") for c in collaborators 
+                if isinstance(c, dict) and "uid" in c
+            ]
+
+            if requester_id != owner_uid and requester_id not in collaborator_uids:
                 raise AppException(status_code=403, message="You do not have permission to view this collection.")
         
         return self.build_response(collection)
