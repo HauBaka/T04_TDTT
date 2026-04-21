@@ -1,20 +1,22 @@
+from datetime import datetime, timedelta, timezone
+
 from transformers import pipeline
 import re
 import logging
 import asyncio
-from schemas.discover_schema import AnalyzedReview, UserReview
+from schemas.discover_schema import AnalyzedReview, DiscoverHotel, UserReview
 
 logger = logging.getLogger(__name__)
-
+REAL_RATING_CACHE_EXPIRATION_DAYS=7
 class SentimentService:
     def __init__(self):
         # Khởi tạo PhoBERT (Chỉ load 1 lần khi khởi động Server để tránh lag)
         try:
             self.sentiment_analyzer = pipeline(
-                "sentiment-analysis", 
+                "sentiment-analysis",  # type: ignore
                 model="wonrax/phobert-base-vietnamese-sentiment",
                 device=-1 # Chạy trên CPU
-            )
+            ) # type: ignore
         except Exception as e:
             logger.error(f"Lỗi khi tải PhoBERT: {str(e)}")
             self.sentiment_analyzer = None
@@ -135,4 +137,64 @@ class SentimentService:
 
         return round(final_real_rating, 2), round(avg_trust, 2), analyzed_list
     
+    async def process_places_real_rating(self, filtered_places: list[DiscoverHotel]):
+        """
+        Xử lý điểm đánh giá thực tế cho từng khách sạn trong danh sách đã lọc. Cụ thể:
+        Với mỗi khách sạn trong filtered_places, kiểm tra xem đã có điểm đánh giá thực tế (ai_score) và ngày hết hạn của điểm đó (ai_score_expiration_date):
+            - Nếu có và còn hạn (cập nhật trong vòng 7 ngày), lấy điểm đánh giá thực tế
+            - Nếu không có hoặc đã hết hạn, gọi SentimentService để tính điểm đánh giá thực tế mới dựa trên review gốc và phân tích cảm xúc
+        """
+        
+        if not filtered_places or len(filtered_places) == 0:
+            return
+        
+        sentiment_tasks = []
+        places_needing_calculation = []
+        now = datetime.now(timezone.utc)
+
+        for place in filtered_places:
+            expiration_date = place.ai_score_expiration_date # Sử dụng datetime để so sánh, tránh chuyển đổi qua lại giữa string và datetime
+            has_cache = len(place.analyzed_reviews) > 0 # Đã có AI review chưa
+
+            if has_cache and (expiration_date and now < expiration_date):
+                # Nếu đã có ai review và còn hạn, thì không cần tính lại
+                continue
+
+            # Lấy raw_reviews (danh sách UserReview) từ object
+            raw_reviews = place.user_reviews # luôn có trường này
+            if not raw_reviews or len(raw_reviews) == 0:
+                # Nếu không có review nào, không thể tính điểm đánh giá thực tế, gán mặc định để tránh lỗi
+                place.ai_score = place.raw_rating 
+                place.analyzed_reviews = []
+                place.ai_score_expiration_date = now + timedelta(days=REAL_RATING_CACHE_EXPIRATION_DAYS)
+                place.trust_weight = 0.0 # Không có review nào -> không đáng tin cậy
+                continue
+
+            # Đưa vào hàng đợi để gọi AI xử lí song song
+            task = self.calculate_real_rating(raw_reviews)
+            sentiment_tasks.append(task)
+            places_needing_calculation.append(place)
+
+        # Thực thi tất cả các tác vụ AI cùng lúc
+        if sentiment_tasks:
+            results = await asyncio.gather(*sentiment_tasks, return_exceptions=True)
+            new_expiration_date = now + timedelta(days=REAL_RATING_CACHE_EXPIRATION_DAYS) # Sử dụng datetime 
+            # Cập nhật kết quả vào từng place tương ứng
+            for place, result in zip(places_needing_calculation, results):
+                if isinstance(result, BaseException):
+                    # Nếu có lỗi khi gọi AI, gán mặc định tạm thời để tránh bị kẹt 7 ngày không có điểm đánh giá nào cả
+                    place.ai_score = place.raw_rating  # Hoặc có thể gán một giá trị mặc định nào đó
+                    place.analyzed_reviews = []
+                    place.ai_score_expiration_date = now
+                    place.trust_weight = 0.0
+                    continue
+
+                # Gán kết quả AI vào Place
+                real_rating, trust_weight, analyzed_reviews = result
+                place.ai_score = real_rating
+                place.trust_weight = trust_weight
+                place.analyzed_reviews = analyzed_reviews
+                place.ai_score_expiration_date = new_expiration_date
+    
+
 sentiment_service = SentimentService()

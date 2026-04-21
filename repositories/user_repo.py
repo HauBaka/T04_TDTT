@@ -8,24 +8,41 @@ class UserRepository:
         return get_db()
     
     async def get_user(self, uid: str) -> dict | None:
-        pass
-    async def create_user(self, user_data: dict) -> bool:
-        # [Nhánh Not Exists]: Lưu thông tin user mới
-        db = self._get_db()
+        doc = await self._get_db().collection(self.user_collection).document(uid).get()
+        return doc.to_dict() if doc.exists else None
+    
+    async def create_user(self, user_data: dict) -> str | None:
         uid = user_data.get("uid")
-
         if not uid:
-            return False
-        await db.collection(self.user_collection).document(uid).set(user_data)
-        return True
+            return None
+        await self._get_db().collection(self.user_collection).document(uid).set(user_data)
+        return uid
         
-    async def update_user(self, uid: str, update_data: dict) -> bool | None:
-        pass
+    async def update_user(self, uid: str, update_data: dict) -> None:
+        # NOTE: Để service xử lý exceptions
+        await self._get_db().collection(self.user_collection).document(uid).update(update_data)
 
-    async def delete_user(self, uid: str) -> bool | None:
-        pass
+    async def delete_user(self, uid: str) -> bool:
+        doc_ref = self._get_db().collection(self.user_collection).document(uid)
+        doc = await doc_ref.get()
+        
+        if not doc.exists:
+            return False
+
+        await doc_ref.delete()
+        return True
 
     async def get_user_by_username(self, username: str) -> dict | None:
-        pass
+        docs = await self._get_db().collection(self.user_collection).where("username_lower", "==", username.lower()).limit(1).get()
+        for doc in docs:
+            return doc.to_dict()
+        return None
+
+    async def get_user_by_email(self, email: str) -> dict | None:
+        docs = await self._get_db().collection(self.user_collection).where("email", "==", email.lower()).limit(1).get()
+
+        for doc in docs:
+            return doc.to_dict()
+        return None
 
 user_repo = UserRepository()
