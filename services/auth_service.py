@@ -32,7 +32,9 @@ class AuthenticationService:
                 liked_req = CollectionCreateRequest(
                     name="Liked", 
                     description="Your liked accomodations", 
-                    visibility=CollectionVisibility.PRIVATE
+                    tags = [],
+                    visibility=CollectionVisibility.PRIVATE,
+                    thumbnail_url=None
                 )
                 new_collection = await collection_repo.create_collection(uid, liked_req.model_dump())
 
