@@ -2,7 +2,6 @@ from pydantic import BaseModel, Field, model_validator
 from datetime import datetime
 from typing import Optional, Dict, Any
 
-
 class UserSchema(BaseModel):
     uid: str
     username: str
@@ -25,10 +24,10 @@ class UserResponse(BaseModel):
     user: UserPublic | UserPrivate
 
 class UserUpdateRequest(BaseModel):
-    display_name: str | None = None
-    email: str | None = None
+    username: str | None = Field(None, min_length=3, max_length=16)
+    display_name: str | None = Field(None, min_length=3, max_length=32)
+    email: str | None = Field(None, pattern=r'^[\w\.-]+@[\w\.-]+\.\w+$')
+    phone_number: str | None = None
     avatar_url: str | None = None
     bio: str | None = Field(None, max_length=500)
-    # Có thể thêm các trường khác như avatar_url, bio, v.v.
-
 

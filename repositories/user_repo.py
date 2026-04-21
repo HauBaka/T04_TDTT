@@ -18,22 +18,29 @@ class UserRepository:
         await self._get_db().collection(self.user_collection).document(uid).set(user_data)
         return uid
         
-    async def update_user(self, uid: str, update_data: dict) -> bool | None:
-        try:
-            await self._get_db().collection(self.user_collection).document(uid).update(update_data)
-            return True
-        except Exception:
+    async def update_user(self, uid: str, update_data: dict) -> None:
+        # NOTE: Để service xử lý exceptions
+        await self._get_db().collection(self.user_collection).document(uid).update(update_data)
+
+    async def delete_user(self, uid: str) -> bool:
+        doc_ref = self._get_db().collection(self.user_collection).document(uid)
+        doc = await doc_ref.get()
+        
+        if not doc.exists:
             return False
 
-    async def delete_user(self, uid: str) -> bool | None:
-        try:
-            await self._get_db().collection(self.user_collection).document(uid).delete()
-            return True
-        except Exception:
-            return False
+        await doc_ref.delete()
+        return True
 
     async def get_user_by_username(self, username: str) -> dict | None:
-        docs = await(self._get_db().collection(self.user_collection).where("username_lower", "==", username.lower()).limit(1).get())
+        docs = await self._get_db().collection(self.user_collection).where("username_lower", "==", username.lower()).limit(1).get()
+        for doc in docs:
+            return doc.to_dict()
+        return None
+
+    async def get_user_by_email(self, email: str) -> dict | None:
+        docs = await self._get_db().collection(self.user_collection).where("email", "==", email.lower()).limit(1).get()
+
         for doc in docs:
             return doc.to_dict()
         return None
