@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field, model_validator
 from datetime import date, datetime, timezone
 from typing import Annotated
+from schemas.trip_context_schema import TravelStyle, TripSearchCriteria
 
 # ==============================
 # CÁC CLASS REQUEST & VALIDATION
@@ -15,6 +16,10 @@ class DiscoverRequest(BaseModel):
     children: list[Annotated[int, Field(ge=1, le=17)]] | None = None  # Tuổi của trẻ em, ví dụ: [5, 8] nếu có 2 trẻ em 5 và 8 tuổi
     adults: int
     personality: str # để tạm
+    trip_style: TravelStyle = TravelStyle.EXPLORE
+    
+    trip_criteria: TripSearchCriteria | None = None
+    max_ranked_hotels: Annotated[int, Field(ge=1, le=200)] | None = None
     
     # Thêm ràng buộc
     @model_validator(mode='after')
@@ -32,6 +37,23 @@ class DiscoverRequest(BaseModel):
         # 2. Ràng buộc giá: min_price < max_price
         if self.min_price >= self.max_price:
             raise ValueError("min_price must be less than max_price.")
+
+        # 3. Đồng bộ trip_criteria để tránh trùng/lệch dữ liệu với các field cơ bản.
+        party_size = (self.adults or 0) + len(self.children or [])
+
+        if self.trip_criteria is None:
+            self.trip_criteria = TripSearchCriteria(
+                budget_min=self.min_price,
+                budget_max=self.max_price,
+                trip_style=self.trip_style,
+                party_size=party_size,
+            )
+        else:
+            # Nếu FE đã gửi trip_criteria thì chuẩn hoá để match với request chính.
+            self.trip_criteria.budget_min = self.min_price
+            self.trip_criteria.budget_max = self.max_price
+            self.trip_criteria.trip_style = self.trip_style
+            self.trip_criteria.party_size = party_size
             
         return self
 
@@ -62,6 +84,13 @@ class UserReview(BaseModel):
 # ==========================================
 # CÁC CLASS DATA KHÁC
 # ==========================================
+
+class WeatherInfo(BaseModel):
+    """Schema lưu trữ thông tin thời tiết tại điểm đến"""
+    
+    condition: str # trạng thái thời tiết (VD: Trời nắng, Mưa to, Nhiều mây)
+    temp_c: float # nhiệt độ thực tế
+    rain_chance: int # Xác suất có mưa
 
 class GPSCoordinates(BaseModel):
     latitude: float

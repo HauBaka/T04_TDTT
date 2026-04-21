@@ -1,6 +1,8 @@
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 from datetime import datetime
-from typing import Optional, Dict, Any
+from schemas.collection_schema import CollectionPublic
+from schemas.user_preference_schema import ScoringWeights, UserBehaviorEvent, UserTravelPreference
+
 
 class UserSchema(BaseModel):
     uid: str
@@ -9,6 +11,13 @@ class UserSchema(BaseModel):
     email: str
     avatar_url: str | None = None
     bio: str | None = Field(None, max_length=500)
+    created_at: datetime
+    
+    # Các trường thông tin cá nhân khác có thể thêm vào đây
+    travel_profile: UserTravelPreference | None = None
+    collections: list[CollectionPublic] = Field(default_factory=list)
+    user_behavior_history: list[UserBehaviorEvent] = Field(default_factory=list)
+    scoring_weights: ScoringWeights | None = None
 
 # Không cần chỉnh bật/tắt field vì phức tạp quá
 class UserPublic(BaseModel):
@@ -19,6 +28,12 @@ class UserPublic(BaseModel):
 
 class UserPrivate(UserPublic):
     email: str | None = None
+    
+    # Các trường thông tin cá nhân khác có thể thêm vào đây
+    travel_profile: UserTravelPreference | None = None
+    collections: list[CollectionPublic] = Field(default_factory=list)
+    user_behavior_history: list[UserBehaviorEvent] = Field(default_factory=list)
+    scoring_weights: ScoringWeights | None = None
 
 class UserResponse(BaseModel):
     user: UserPublic | UserPrivate
