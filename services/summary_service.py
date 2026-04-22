@@ -4,6 +4,7 @@ import logging
 import re
 import asyncio
 from externals.Gemini import gemini_client
+from services.local_summary_service import ollama_client
 from services.hotel_ranking_service import hotel_ranking_service
 from services.weather_service import weather_service
 from schemas.discover_schema import AnalyzedReview, DiscoverHotel, NearbyPlace, AIReviewSummary, WeatherInfo
@@ -13,7 +14,8 @@ SUMMARY_CACHE_EXPIRATION_DAYS = 14
 
 class SummaryService:
     def __init__(self):
-        self.ai_client = gemini_client
+        #self.ai_client = gemini_client
+        self.ai_client=ollama_client
 
     async def generate_places_summary(
                 self, 
