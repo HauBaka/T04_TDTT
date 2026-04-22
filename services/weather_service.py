@@ -1,6 +1,5 @@
-import asyncio
 import logging
-from schemas.discover_schema import DiscoverHotel, WeatherInfo
+from schemas.discover_schema import DiscoverHotel, GPSCoordinates, WeatherInfo
 from externals.WeatherOpenMeteo import weather_open_meteo
 from datetime import datetime, timedelta
 from services.hotel_ranking_service import hotel_ranking_service
@@ -60,60 +59,43 @@ class WeatherService:
             
         return summary
     
-    async def build_weather_context(self, places: list[DiscoverHotel], check_in_date: datetime, check_out_date: datetime) -> dict[str, list[WeatherInfo]]:
+    async def build_weather_context(
+        self,
+        places: list[DiscoverHotel],
+        check_in_date: datetime,
+        check_out_date: datetime,
+        destination_gps: GPSCoordinates | None = None,
+    ) -> dict[str, list[WeatherInfo]]:
         """
-        Lấy thông tin thời tiết cho từng khách sạn trong danh sách places dựa trên tọa độ GPS của khách sạn.
-        Nếu có khách sạn nào không lấy được weather riêng, sẽ dùng weather mặc định của vùng tìm kiếm.
+        Lấy thông tin thời tiết 1 lần từ tọa độ vùng đi,
+        sau đó gán cùng dữ liệu weather cho toàn bộ danh sách places.
         """
         # Format lại theo "YYYY-MM-DD"
         from_date = check_in_date.strftime("%Y-%m-%d")
         to_date = check_out_date.strftime("%Y-%m-%d")
 
-        weather_tasks = []
-        hotels_with_gps = []
-        for hotel in places:
-            if hotel.gps_coordinates is None:
-                continue
-
-            hotels_with_gps.append(hotel)
-            weather_tasks.append(
-                self.get_weather(
-                    lat=hotel.gps_coordinates.latitude,
-                    lng=hotel.gps_coordinates.longitude,
-                    from_date=from_date,
-                    to_date=to_date,
-                )
-            )
-
-        if not weather_tasks:
+        if destination_gps is None:
             return {}
 
-        weather_results = await asyncio.gather(*weather_tasks, return_exceptions=True)
+        try:
+            shared_weather = await self.get_weather(
+                lat=destination_gps.latitude,
+                lng=destination_gps.longitude,
+                from_date=from_date,
+                to_date=to_date,
+            )
+        except Exception as exc:
+            logger.warning(f"Không lấy được weather theo vùng đi: {str(exc)}")
+            return {}
+
+        if not isinstance(shared_weather, list):
+            logger.warning(f"Kết quả weather không hợp lệ theo vùng đi: {shared_weather}")
+            return {}
 
         weather_by_identity: dict[str, list[WeatherInfo]] = {}
-        default_weather: list[WeatherInfo] | None = None
-
-        for hotel, weather in zip(hotels_with_gps, weather_results):
-            if isinstance(weather, Exception):
-                logger.warning(f"Không lấy được weather cho {hotel.name}: {str(weather)}")
-                continue
-
-            if not isinstance(weather, list):
-                logger.warning(f"Kết quả weather không hợp lệ cho {hotel.name}: {weather}")
-                continue
-
+        for hotel in places:
             weather_key = hotel_ranking_service._hotel_weather_key(hotel)
-            weather_by_identity[weather_key] = weather
-
-            # Dùng weather thành công đầu tiên làm mặc định cho địa chỉ tìm kiếm.
-            if default_weather is None:
-                default_weather = weather
-
-        # Hotel nào thiếu weather riêng sẽ nhận weather mặc định của vùng tìm kiếm.
-        if default_weather is not None:
-            for hotel in places:
-                weather_key = hotel_ranking_service._hotel_weather_key(hotel)
-                weather_by_identity.setdefault(weather_key, default_weather)
+            weather_by_identity[weather_key] = shared_weather
 
         return weather_by_identity
 
