@@ -44,7 +44,7 @@ async def app_exception_handler(request: Request, exc: AppException):
     return JSONResponse(
         status_code=exc.status_code,
         content={
-            "status": "error",
+            "status_code": exc.status_code,
             "message": exc.message,
             "data": None
         }
@@ -55,7 +55,7 @@ async def general_exception_handler(request: Request, exc: Exception):
     return JSONResponse(
         status_code=500,
         content={
-            "status": "error",
+            "status_code": 500,
             "message": "An unexpected error occurred.",
             "data": None
         }
