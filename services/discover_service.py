@@ -6,6 +6,7 @@ from services.weather_service import weather_service
 from services.hotel_ranking_service import hotel_ranking_service
 from mock_data.virtual_review import virtual_review_manager
 from externals.SerpAPI import serp_api
+from externals.VietMapAPI import vietmap_api
 from repositories.hotel_repo import hotel_repo
 from loguru import logger
 
@@ -33,13 +34,53 @@ class DiscoverService:
     async def get_reviews(self, hotels: list[DiscoverHotel]):
         """Lấy review cho từng khách sạn"""
         for hotel in hotels:
-            virtual_review_manager.add_random_reviews(hotel, min_count=25, max_count=50)
+            virtual_review_manager.add_random_reviews(hotel, min_count=3, max_count=12)
         # XXX: hơi chậm
     
         
     async def execute_discover_pipeline(self) -> list[DiscoverHotel]:
         """Thực thi pipeline tìm kiếm"""
-        raw_results = await self.raw_search()
+        gps_coordinates = None
+        if self.payload.ref_id:
+            # Nếu có ref_id, ưu tiên lấy GPS từ VietMap để có kết quả chính xác hơn
+            place_detail = await vietmap_api.get_place_details(self.payload.ref_id)
+            if place_detail and place_detail.result and place_detail.result.gps_coordinates:
+                gps_coordinates = place_detail.result.gps_coordinates
+                self.payload.address = place_detail.result.name
+        else: # Tìm dựa trên address được nhập
+            autocomplete_result = await vietmap_api.autocomplete(self.payload.address, self.payload.gps)
+            if autocomplete_result and autocomplete_result.data:
+                # Ko có gps ng dùng thì lấy cái đầu
+                self.payload.address = autocomplete_result.data[0].display
+
+                place_detail = await vietmap_api.get_place_details(autocomplete_result.data[0].ref_id)
+                if place_detail and place_detail.result and place_detail.result.gps_coordinates:
+                    gps_coordinates = place_detail.result.gps_coordinates # ưu tiên GPS từ autocomplete nếu có
+
+        # Lấy trong database
+        raw_results = await hotel_repo.search_hotels(gps_coordinates.latitude, gps_coordinates.longitude) if gps_coordinates else []
+        # Dùng SerpAPI
+        serpapi_results = await self.raw_search()
+        
+        hotel_dict: dict[str, DiscoverHotel] = {} # Gộp 2 kết quả
+        for hotel in raw_results:
+            if hotel.property_token:
+                hotel_dict[hotel.property_token] = hotel
+
+        for hotel in serpapi_results:
+            if not hotel.property_token:
+                continue
+            
+            if hotel.property_token not in hotel_dict: # Thêm mới
+                hotel_dict[hotel.property_token] = hotel
+            else:
+                # Update giá
+                db_hotel = hotel_dict[hotel.property_token]
+                db_hotel.price = hotel.price
+                db_hotel.deal = hotel.deal
+
+        raw_results = list(hotel_dict.values())
+
         await self.get_reviews(raw_results)
         await self.sentiment_service.process_places_real_rating(raw_results)
         

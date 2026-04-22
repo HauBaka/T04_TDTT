@@ -3,6 +3,7 @@ from loguru import logger
 from schemas.discover_schema import DiscoverHotel
 from core.database import get_db
 import asyncio
+import pygeohash as pgh
 from datetime import datetime, timezone
 class HotelRepository:
     def __init__(self):
@@ -67,5 +68,22 @@ class HotelRepository:
 
         if count > 0:
             await self._commit_batch(batch)
+
+    async def search_hotels(self, lat: float, lng: float) -> list[DiscoverHotel]:
+        """Tìm kiếm khách sạn dựa trên tọa độ và bán kính."""
+        center_hash  = pgh.encode(lat, lng, precision=5)
+        start_hash = center_hash
+        end_hash = center_hash + "~"
+        docs = self._get_db().collection(self.hotel_collection).where("gps_coordinates.geohash", ">=", start_hash).where("gps_coordinates.geohash", "<=", end_hash).stream()
+        hotels = []
+        async for doc in docs:
+            data = doc.to_dict()
+            try:
+                hotel = DiscoverHotel.model_validate(data)
+                hotels.append(hotel)
+            except Exception as e:
+                logger.error(f"Error validating hotel data for document {doc.id}: {str(e)}")
+
+        return hotels
 
 hotel_repo = HotelRepository()

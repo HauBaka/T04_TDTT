@@ -1,5 +1,6 @@
+from __future__ import annotations
 from pydantic import BaseModel, Field, model_validator
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from typing import Annotated
 from schemas.trip_context_schema import TravelStyle, TripSearchCriteria
 
@@ -9,6 +10,9 @@ from schemas.trip_context_schema import TravelStyle, TripSearchCriteria
 class DiscoverRequest(BaseModel):
     language: str # để tạm
     address: str
+    gps: GPSCoordinates | None = None
+    ref_id: str | None = None # ref_id của VietMap nếu có, để ưu tiên tìm kiếm chính xác hơn
+    
     check_in: datetime
     check_out: datetime
     min_price: int
@@ -95,7 +99,7 @@ class WeatherInfo(BaseModel):
 class GPSCoordinates(BaseModel):
     latitude: float
     longitude: float
-
+    geohash: str | None = None
 class HotelImage(BaseModel):
     thumbnail: str | None = None
     original_image: str | None = None
