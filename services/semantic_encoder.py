@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from functools import lru_cache
-from typing import Iterable
+
+from loguru import logger
 
 import torch
-from loguru import logger
-from transformers import AutoModel, AutoTokenizer
+from externals.SemanticModel import semantic_model_client
 
 @dataclass(frozen=True)
 class SemanticScore:
@@ -17,8 +16,7 @@ class SemanticScore:
 
 
 class SemanticTextEncoder:
-    def __init__(self, model_name: str = "intfloat/multilingual-e5-small"):
-        self.model_name = model_name
+    def __init__(self):
         self._tokenizer = None
         self._model = None
         self._available: bool | None = None
@@ -81,16 +79,20 @@ class SemanticTextEncoder:
 
         try:
             # Load model/tokenizer once; all later calls reuse them.
-            self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-            self._model = AutoModel.from_pretrained(self.model_name)
-            self._model.eval()
-            self._available = True
-            logger.info(f"Semantic encoder ready: {self.model_name}")
+            self._tokenizer = semantic_model_client.tokenizer
+            self._model = semantic_model_client.semantic_model
+            if self._model is not None:
+                self._model.eval()
+            self._available = self._tokenizer is not None and self._model is not None
+            if self._available:
+                logger.info(f"Semantic encoder ready")
+            else:
+                logger.warning(f"Semantic encoder not available")
         except Exception as exc:
             self._available = False
             self._tokenizer = None
             self._model = None
-            logger.warning(f"Không tải được semantic encoder '{self.model_name}': {str(exc)}")
+            logger.warning(f"Không tải được semantic encoder: {str(exc)}")
 
     def _encode_batch(self, texts: list[str]) -> list[torch.Tensor]:
         assert self._tokenizer is not None

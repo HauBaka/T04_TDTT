@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from transformers import pipeline
+from externals.PhoBERT import PhoBERT
 import re
 import logging
 import asyncio
@@ -12,11 +12,7 @@ class SentimentService:
     def __init__(self):
         # Khởi tạo PhoBERT (Chỉ load 1 lần khi khởi động Server để tránh lag)
         try:
-            self.sentiment_analyzer = pipeline(
-                "sentiment-analysis",  # type: ignore
-                model="wonrax/phobert-base-vietnamese-sentiment",
-                device=-1 # Chạy trên CPU
-            ) # type: ignore
+            self.sentiment_analyzer = PhoBERT
         except Exception as e:
             logger.error(f"Lỗi khi tải PhoBERT: {str(e)}")
             self.sentiment_analyzer = None

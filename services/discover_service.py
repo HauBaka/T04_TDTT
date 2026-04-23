@@ -86,7 +86,13 @@ class DiscoverService:
         
         weather_by_identity: dict[str, list[WeatherInfo]] = {}
         try:
-            weather_by_identity = await weather_service.build_weather_context(raw_results, self.payload.check_in, self.payload.check_out)
+            destination_gps = gps_coordinates or self.payload.gps
+            weather_by_identity = await weather_service.build_weather_context(
+                raw_results,
+                self.payload.check_in,
+                self.payload.check_out,
+                destination_gps=destination_gps,
+            )
         except Exception as exc:
             logger.warning(f"Không xây dựng được weather context cho pipeline: {str(exc)}")
 
