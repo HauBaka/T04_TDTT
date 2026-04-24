@@ -834,7 +834,10 @@ class HotelRankingService:
             if collection.tags:
                 parts.append(f"tag: {'; '.join(collection.tags)}")
             if collection.places:
-                parts.append(f"dia_diem_da_luu: {'; '.join(collection.places)}")
+                place_ids = [getattr(place, "place_id", "") for place in collection.places]
+                place_ids = [place_id for place_id in place_ids if place_id]
+                if place_ids:
+                    parts.append(f"dia_diem_da_luu: {'; '.join(place_ids)}")
         return " | ".join(parts)
 
     def _history_semantic_text(self, history: list[UserBehaviorEvent]) -> str:
@@ -903,7 +906,7 @@ class HotelRankingService:
         if requester_username:
             try:
                 profile_response = await user_service.get_profile(
-                    requester_token=None,
+                    requester_uid=None,
                     target_username=requester_username,
                 )
                 private_user = profile_response.user
