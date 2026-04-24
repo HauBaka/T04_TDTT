@@ -887,13 +887,12 @@ class HotelRankingService:
     def _style_label(self, trip_style: TravelStyle) -> str:
         return self.STYLE_LABELS.get(trip_style, "chưa xác định")
 
-
     async def rank_discovered_hotels(
         self,
         places: list[DiscoverHotel],
         payload: DiscoverRequest,
         weather_by_identity: dict[str, list[WeatherInfo]] | None = None,
-        requester_username: str | None = None,
+        requester_username: str | None = None, # TODO: thay thành uid sẽ tối ưu hơn
     ) -> list[DiscoverHotel]:
         if not places:
             return places
@@ -905,11 +904,11 @@ class HotelRankingService:
 
         if requester_username:
             try:
-                profile_response = await user_service.get_profile(
+                profile_response = await user_service.get_profile( # TODO: Nên dùng uid + user_repo
                     requester_uid=None,
                     target_username=requester_username,
                 )
-                private_user = profile_response.user
+                private_user = profile_response.data
 
                 profile_data = getattr(private_user, "travel_profile", None)
                 if isinstance(profile_data, UserTravelPreference):

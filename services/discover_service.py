@@ -17,7 +17,6 @@ class DiscoverService:
         self.requester_username = requester_username
         self.sentiment_service = sentiment_service
 
-
     async def raw_search(self) -> list[DiscoverHotel]:
         """Gọi SerpAPI để lấy dữ liệu thô dựa trên payload đầu vào"""
         result = await serp_api.search_places(
@@ -97,7 +96,7 @@ class DiscoverService:
         except Exception as exc:
             logger.warning(f"Không xây dựng được weather context cho pipeline: {str(exc)}")
 
-        # raw_results = await hotel_ranking_service.rank_discovered_hotels(raw_results, self.payload, weather_by_identity=weather_by_identity, requester_username=self.requester_username)
+        raw_results = await hotel_ranking_service.rank_discovered_hotels(raw_results, self.payload, weather_by_identity=weather_by_identity, requester_username=self.requester_username)
         # await summary_service.process_places_ai_summary(raw_results, weather_by_identity=weather_by_identity) XXX: quá nghèo để có thể gọi AI Summary, tạm thời để sau
         # Chạy ngầm
         asyncio.create_task(
