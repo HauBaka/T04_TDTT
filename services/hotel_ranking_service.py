@@ -439,7 +439,10 @@ class HotelRankingService:
 
         for collection in collections:
             collection_tokens = self._collection_tokens(collection)
-            exact_match = any(self._normalize_token(place) == signal.identity for place in collection.places)
+            exact_match = any(
+                self._normalize_token(getattr(place, "place_id", "")) == signal.identity
+                for place in collection.places
+            )
             if exact_match:
                 scores.append(1.0)
                 continue
@@ -604,7 +607,10 @@ class HotelRankingService:
         tokens = set(self._tokenize(collection.name))
         tokens.update(self._tokenize(collection.description or ""))
         tokens.update(self._tokenize(" ".join(collection.tags)))
-        tokens.update(self._tokenize(" ".join(collection.places)))
+        for place in collection.places:
+            place_id = getattr(place, "place_id", "")
+            if place_id:
+                tokens.update(self._tokenize(place_id))
         return tokens
 
     def _event_tokens(self, event: UserBehaviorEvent) -> set[str]:
