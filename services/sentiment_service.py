@@ -135,9 +135,9 @@ class SentimentService:
     
     async def process_places_real_rating(self, filtered_places: list[DiscoverHotel]):
         """
-        Xử lý điểm đánh giá thực tế cho từng khách sạn trong danh sách đã lọc. Cụ thể:
-        Với mỗi khách sạn trong filtered_places, kiểm tra xem đã có điểm đánh giá thực tế (ai_score) và ngày hết hạn của điểm đó (ai_score_expiration_date):
-            - Nếu có và còn hạn (cập nhật trong vòng 7 ngày), lấy điểm đánh giá thực tế
+        Xử lý điểm đánh giá thực tế cho từng khách sạn trong danh sách đã lọc. Cụ thể:\n
+        Với mỗi khách sạn trong filtered_places, kiểm tra xem đã có điểm đánh giá thực tế (ai_score) và ngày hết hạn của điểm đó (ai_score_expiration_date):\n
+            - Nếu có và còn hạn (cập nhật trong vòng 7 ngày), lấy điểm đánh giá thực tế\n
             - Nếu không có hoặc đã hết hạn, gọi SentimentService để tính điểm đánh giá thực tế mới dựa trên review gốc và phân tích cảm xúc
         """
         

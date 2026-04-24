@@ -57,6 +57,9 @@ class UserService:
         
         return ResponseSchema(status_code=200, message="Profile updated successfully", data=UserPrivate(**updated_user_dict))
         
+    async def update_liked_collection(self, requester_uid: str, place_id: str, add: bool) -> ResponseSchema:
+        return ResponseSchema(status_code=200, message="Liked collection updated successfully", data=None)
+
     async def delete_profile(self, requester_uid: str) -> ResponseSchema:
         deleted = await self.user_repo.delete_user(requester_uid)
         if not deleted:

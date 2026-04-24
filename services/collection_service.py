@@ -3,11 +3,12 @@ from repositories.user_repo import user_repo
 from schemas.collection_schema import CollectionPublic, CollectionResponse, CollectionVisibility
 from repositories.collection_repo import collection_repo
 from core.exceptions import AppException, NotFoundError
+from schemas.response_schema import ResponseSchema
 class CollectionService:
     def __init__(self):
         self.collection_repo = collection_repo
 
-    async def create_collection(self, user_id: str, collection_data: dict) -> CollectionResponse:
+    async def create_collection(self, user_id: str, collection_data: dict) -> ResponseSchema[CollectionResponse]:
         """Tạo một collection mới cho người dùng."""
         created_collection = await collection_repo.create_collection(user_id, collection_data)
         
@@ -16,7 +17,7 @@ class CollectionService:
         
         return self.build_response(created_collection)
     
-    async def get_collection(self, collection_id: str, requester_id: str | None) -> CollectionResponse:
+    async def get_collection(self, collection_id: str, requester_id: str | None) -> ResponseSchema[CollectionResponse]:
         """Lấy thông tin của một collection cụ thể."""
         collection = await collection_repo.get_collection(collection_id)
         if not collection:
@@ -37,7 +38,7 @@ class CollectionService:
         
         return self.build_response(collection)
     
-    async def update_collection(self, collection_id: str, requester_id: str, update_data: dict) -> CollectionResponse:
+    async def update_collection(self, collection_id: str, requester_id: str, update_data: dict) -> ResponseSchema[CollectionResponse]:
         """Cập nhật thông tin của một collection."""
 
         # Check collection có tồn tại không
@@ -68,7 +69,7 @@ class CollectionService:
         
         return self.build_response(updated_data)
         
-    async def delete_collection(self, collection_id: str, requester_id: str) -> bool:
+    async def delete_collection(self, collection_id: str, requester_id: str) -> ResponseSchema[bool]:
         """Xóa một collection."""
         collection = await collection_repo.get_collection(collection_id)
         if not collection:
@@ -86,9 +87,9 @@ class CollectionService:
         if collection.get("id") == requester.get("liked_collection", ""):
             raise AppException(status_code=403, message="Cannot delete the default 'liked' collection.")
         
-        return await collection_repo.delete_collection(collection_id)
+        return ResponseSchema(data=await collection_repo.delete_collection(collection_id))
     
-    def build_response(self, collection_data: dict) -> CollectionResponse:
+    def build_response(self, collection_data: dict) -> ResponseSchema[CollectionResponse]:
         """Xây dựng response cho collection."""
         if not collection_data:
             raise NotFoundError("Invalid collection ID.")
@@ -106,6 +107,6 @@ class CollectionService:
             tags = collection_data.get("tags", []),
             visibility = CollectionVisibility(collection_data.get("visibility", "public"))
         )
-        return CollectionResponse(collection=collection)
-    
+        return ResponseSchema(data=CollectionResponse(collection=collection))
+
 collection_service = CollectionService()

@@ -439,7 +439,10 @@ class HotelRankingService:
 
         for collection in collections:
             collection_tokens = self._collection_tokens(collection)
-            exact_match = any(self._normalize_token(place) == signal.identity for place in collection.places)
+            exact_match = any(
+                self._normalize_token(getattr(place, "place_id", "")) == signal.identity
+                for place in collection.places
+            )
             if exact_match:
                 scores.append(1.0)
                 continue
@@ -604,7 +607,10 @@ class HotelRankingService:
         tokens = set(self._tokenize(collection.name))
         tokens.update(self._tokenize(collection.description or ""))
         tokens.update(self._tokenize(" ".join(collection.tags)))
-        tokens.update(self._tokenize(" ".join(collection.places)))
+        for place in collection.places:
+            place_id = getattr(place, "place_id", "")
+            if place_id:
+                tokens.update(self._tokenize(place_id))
         return tokens
 
     def _event_tokens(self, event: UserBehaviorEvent) -> set[str]:
@@ -828,7 +834,10 @@ class HotelRankingService:
             if collection.tags:
                 parts.append(f"tag: {'; '.join(collection.tags)}")
             if collection.places:
-                parts.append(f"dia_diem_da_luu: {'; '.join(collection.places)}")
+                place_ids = [getattr(place, "place_id", "") for place in collection.places]
+                place_ids = [place_id for place_id in place_ids if place_id]
+                if place_ids:
+                    parts.append(f"dia_diem_da_luu: {'; '.join(place_ids)}")
         return " | ".join(parts)
 
     def _history_semantic_text(self, history: list[UserBehaviorEvent]) -> str:
@@ -878,13 +887,12 @@ class HotelRankingService:
     def _style_label(self, trip_style: TravelStyle) -> str:
         return self.STYLE_LABELS.get(trip_style, "chưa xác định")
 
-
     async def rank_discovered_hotels(
         self,
         places: list[DiscoverHotel],
         payload: DiscoverRequest,
         weather_by_identity: dict[str, list[WeatherInfo]] | None = None,
-        requester_username: str | None = None,
+        requester_username: str | None = None, # TODO: thay thành uid sẽ tối ưu hơn
     ) -> list[DiscoverHotel]:
         if not places:
             return places
@@ -896,11 +904,11 @@ class HotelRankingService:
 
         if requester_username:
             try:
-                profile_response = await user_service.get_profile(
-                    requester_token=None,
+                profile_response = await user_service.get_profile( # TODO: Nên dùng uid + user_repo
+                    requester_uid=None,
                     target_username=requester_username,
                 )
-                private_user = profile_response.user
+                private_user = profile_response.data
 
                 profile_data = getattr(private_user, "travel_profile", None)
                 if isinstance(profile_data, UserTravelPreference):

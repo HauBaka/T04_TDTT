@@ -66,7 +66,7 @@ class DiscoverRequest(BaseModel):
 # ==============================
 
 # Review sau khi phân tích cảm xúc
-class AnalyzedReview(BaseModel):
+class AnalyzedReview(BaseModel): # TODO: Gộp chung với UserReview để đỡ lặp
     text: str
     raw_stars: float
     sentiment_score: float    # Điểm do PhoBERT chấm
@@ -74,7 +74,7 @@ class AnalyzedReview(BaseModel):
     adjusted_stars: float     # Điểm sau khi đối soát (kết hợp raw_stars và sentiment_score)
     
 # Tóm tắt AI cho review
-class AIReviewSummary(BaseModel):
+class AIReviewSummary(BaseModel): # TODO: Chuyển exp date vô đây + score
     overview: str | None = None
     pros: list[str] | None = None
     cons: list[str] | None = None

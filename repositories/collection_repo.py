@@ -23,7 +23,7 @@ class CollectionRepository:
         data["created_at"] = timestamp
         data["updated_at"] = timestamp
 
-        # counters (tuỳ bạn có dùng chỗ khác hay không)
+        # counters
         data["liked_count"] = 0
         data["contributor_count"] = 0
         data["place_count"] = 0

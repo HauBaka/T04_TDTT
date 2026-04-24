@@ -1,3 +1,5 @@
+from loguru import logger
+
 from core.settings import settings
 import httpx
 from schemas.discover_schema import GPSCoordinates
@@ -17,7 +19,7 @@ class VietMapAPI:
     async def get_place_details(self, ref_id: str) -> VietMapPlaceDetailResponse:
         """Lấy chi tiết địa điểm dựa trên ref_id."""
         params = {
-            "ref_id": ref_id,
+            "refid": ref_id,
             "apikey": self.api_key
         }
         async with httpx.AsyncClient() as client:
@@ -29,14 +31,14 @@ class VietMapAPI:
                     result=VietMapPlaceResult(
                         name=data.get("name", ""),
                         gps_coordinates=GPSCoordinates(
-                            latitude=data.get("gps_coordinates", {}).get("latitude", 0.0),
-                            longitude=data.get("gps_coordinates", {}).get("longitude", 0.0),
-                            geohash=pgh.encode(data.get("gps_coordinates", {}).get("latitude", 0.0), \
-                                               data.get("gps_coordinates", {}).get("longitude", 0.0), \
-                                                precision=5)
+                            latitude=data.get("lat", 0.0),
+                            longitude=data.get("lng", 0.0),
+                            geohash=pgh.encode(data.get("lat", 0.0), data.get("lng", 0.0), settings.GEOHASH_PRECISION)
                         )
                     )
                 )
+            
+            logger.warning(f"Failed to get place details from VietMap for ref_id {ref_id}: HTTP {response.status_code} - {response.text}")
 
         return VietMapPlaceDetailResponse(result=None)
 
