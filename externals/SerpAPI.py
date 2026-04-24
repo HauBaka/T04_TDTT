@@ -58,8 +58,6 @@ class SerpAPIClient:
             check_out_date: Optional[str] = None,
             adults: int = 1, 
             children: Optional[list[int]] = None,
-            min_price: int = 0,
-            max_price: int = MAX_PRICE,
             next_page_token: Optional[str] = None
             ) -> SerpAPIResultSchema[list[DiscoverHotel]]:
         """
@@ -84,8 +82,8 @@ class SerpAPIClient:
             "check_in_date": check_in_date,
             "check_out_date": check_out_date,
             "adults": adults,
-            "min_price": min_price,
-            "max_price": max_price,
+            "min_price": 1,
+            "max_price": MAX_PRICE,
         }
 
         if next_page_token:
@@ -124,7 +122,7 @@ class SerpAPIClient:
                             longitude=hotel["gps_coordinates"].get("longitude", 0.0),
                             geohash=pgh.encode(hotel["gps_coordinates"].get("latitude", 0.0), \
                                                hotel["gps_coordinates"].get("longitude", 0.0), \
-                                                precision=5)
+                                                precision=settings.GEOHASH_PRECISION)
                         )
 
                     # images
@@ -175,10 +173,5 @@ class SerpAPIClient:
                 message=f"error: network/request failed ({str(e)})",
                 data=[]
             )
-    def search_reviews(
-            self, 
-            language: str = "vi", 
-            property_token: str = ""
-            ) -> dict:
-        return {"reviews": "This is a mock reviews result from SerpAPI."}
+
 serp_api = SerpAPIClient()

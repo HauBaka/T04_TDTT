@@ -9,6 +9,7 @@ from externals.SerpAPI import serp_api
 from externals.VietMapAPI import vietmap_api
 from repositories.hotel_repo import hotel_repo
 from loguru import logger
+import asyncio
 
 class DiscoverService:
     def __init__(self, payload: DiscoverRequest, requester_username: str | None = None):
@@ -26,15 +27,16 @@ class DiscoverService:
             check_out_date=self.payload.check_out.strftime("%Y-%m-%d"),
             adults=self.payload.adults,
             children=self.payload.children,
-            min_price=self.payload.min_price,
-            max_price=self.payload.max_price,
         )
         return result.data or []
       
     async def get_reviews(self, hotels: list[DiscoverHotel]):
         """Lấy review cho từng khách sạn"""
         for hotel in hotels:
-            virtual_review_manager.add_random_reviews(hotel, min_count=3, max_count=12)
+            if len(hotel.user_reviews) > 0:
+                continue
+
+            virtual_review_manager.add_random_reviews(hotel, min_count=3, max_count=5)
         # XXX: hơi chậm
     
         
@@ -73,8 +75,7 @@ class DiscoverService:
             
             if hotel.property_token not in hotel_dict: # Thêm mới
                 hotel_dict[hotel.property_token] = hotel
-            else:
-                # Update giá
+            else: # Update thông tin mới cho property 
                 db_hotel = hotel_dict[hotel.property_token]
                 db_hotel.price = hotel.price
                 db_hotel.deal = hotel.deal
@@ -96,7 +97,10 @@ class DiscoverService:
         except Exception as exc:
             logger.warning(f"Không xây dựng được weather context cho pipeline: {str(exc)}")
 
-        raw_results = await hotel_ranking_service.rank_discovered_hotels(raw_results, self.payload, weather_by_identity=weather_by_identity, requester_username=self.requester_username)
+        # raw_results = await hotel_ranking_service.rank_discovered_hotels(raw_results, self.payload, weather_by_identity=weather_by_identity, requester_username=self.requester_username)
         # await summary_service.process_places_ai_summary(raw_results, weather_by_identity=weather_by_identity) XXX: quá nghèo để có thể gọi AI Summary, tạm thời để sau
-        await hotel_repo.upsert_hotels(raw_results)  # Lưu kết quả vào Firestore
+        # Chạy ngầm
+        asyncio.create_task(
+            hotel_repo.sync_hotels_background(raw_results) 
+        )
         return raw_results

@@ -18,6 +18,7 @@ class PhoBERTClient:
                 "sentiment-analysis",  # type: ignore
                 model=self.model_name,
                 device=-1,
+                max_length=256,
             )
             logger.info(f"PhoBERT ready: {self.model_name}")
         except Exception as exc:

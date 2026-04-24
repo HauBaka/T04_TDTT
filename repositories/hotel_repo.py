@@ -1,10 +1,13 @@
 from loguru import logger
 
+from core.settings import settings
 from schemas.discover_schema import DiscoverHotel
 from core.database import get_db
 import asyncio
 import pygeohash as pgh
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from google.cloud.firestore_v1 import FieldFilter
+
 class HotelRepository:
     def __init__(self):
         self.hotel_collection = "hotels"
@@ -13,20 +16,6 @@ class HotelRepository:
     def _get_db(self):
         return get_db()
     
-    async def upsert_hotel(self, hotel: DiscoverHotel):
-        if not hotel.property_token:
-            return
-
-        hotel.last_updated = datetime.now(timezone.utc)
-
-        ref = self._get_db().collection(self.hotel_collection).document(hotel.property_token)
-
-        data = hotel.model_dump(exclude_none=True)
-        if "added_at" not in data:
-            data["added_at"] = hotel.last_updated.isoformat()
-
-        await ref.set(data, merge=True)
-
     async def _commit_batch(self, batch, retries=2):
         for attempt in range(retries + 1):
             try:
@@ -45,11 +34,12 @@ class HotelRepository:
         batch = self._get_db().batch()
         count = 0
 
+        now = datetime.now(timezone.utc)
         for hotel in hotels:
             if not hotel.property_token:
                 continue
             
-            hotel.last_updated = datetime.now(timezone.utc)
+            hotel.last_updated = now
 
             ref = self._get_db().collection(self.hotel_collection).document(hotel.property_token)
 
@@ -69,20 +59,90 @@ class HotelRepository:
         if count > 0:
             await self._commit_batch(batch)
 
+    async def delete_hotels(self, property_tokens: list[str]):
+        if not property_tokens:
+            return
+
+        batch = self._get_db().batch()
+        count = 0
+
+        for token in property_tokens:
+            ref = self._get_db().collection(self.hotel_collection).document(token)
+            batch.delete(ref)
+            count += 1
+
+            if count >= self.BATCH_LIMIT:
+                await self._commit_batch(batch)
+                batch = self._get_db().batch()
+                count = 0
+
+        if count > 0:
+            await self._commit_batch(batch)
+
+    async def sync_hotels_background(self, hotels: list[DiscoverHotel]):
+        """Hàm chạy ngầm để đồng bộ dữ liệu khách sạn mới tìm được vào database mà không cần chờ FE"""
+        try:
+            now = datetime.now(timezone.utc)
+            expire_threshold = now - timedelta(days=settings.HOTEL_DATA_EXPIRE_DAYS)
+
+            to_upsert = []
+            to_delete = []
+
+            for hotel in hotels:
+                if not hotel.property_token:
+                    continue
+
+                if hotel.last_updated and hotel.last_updated < expire_threshold:
+                    to_delete.append(hotel.property_token)
+                    continue
+
+                hotel.last_updated = now
+                to_upsert.append(hotel)
+
+            await self.upsert_hotels(to_upsert)
+            await self.delete_hotels(to_delete)
+
+        except Exception as e:
+            logger.error(f"sync_hotels_background error: {str(e)}")
+
+    def _get_neighbors(self, geohash: str):
+        lat, lon = pgh.decode(geohash)
+        d = 0.04  # offset ~ 4.5km
+
+        neighbors = []
+        for dlat in [-d, 0, d]:
+            for dlon in [-d, 0, d]:
+                if dlat == 0 and dlon == 0:
+                    continue
+                neighbors.append(pgh.encode(lat + dlat, lon + dlon, precision=settings.GEOHASH_PRECISION))
+
+        return neighbors
+    
     async def search_hotels(self, lat: float, lng: float) -> list[DiscoverHotel]:
         """Tìm kiếm khách sạn dựa trên tọa độ và bán kính."""
-        center_hash  = pgh.encode(lat, lng, precision=5)
-        start_hash = center_hash
-        end_hash = center_hash + "~"
-        docs = self._get_db().collection(self.hotel_collection).where("gps_coordinates.geohash", ">=", start_hash).where("gps_coordinates.geohash", "<=", end_hash).stream()
+        center_hash  = pgh.encode(lat, lng, precision=settings.GEOHASH_PRECISION)  # precision=5 cho khoảng 4.9km x 4.9km, có thể điều chỉnh tuỳ nhu cầu
+        hashes = [center_hash] + self._get_neighbors(center_hash)
         hotels = []
-        async for doc in docs:
-            data = doc.to_dict()
-            try:
-                hotel = DiscoverHotel.model_validate(data)
-                hotels.append(hotel)
-            except Exception as e:
-                logger.error(f"Error validating hotel data for document {doc.id}: {str(e)}")
+
+        seen_ids = set()
+
+        for h in hashes:
+            start_hash = h
+            end_hash = h + "~"
+            docs = self._get_db().collection(self.hotel_collection).where(filter=FieldFilter("gps_coordinates.geohash", ">=", start_hash)).where(filter=FieldFilter("gps_coordinates.geohash", "<=", end_hash)).stream()
+            
+            async for doc in docs:
+                if doc.id in seen_ids: # skip repeated document
+                    continue
+
+                seen_ids.add(doc.id)
+
+                data = doc.to_dict()
+                try:
+                    hotel = DiscoverHotel.model_validate(data)
+                    hotels.append(hotel)
+                except Exception as e:
+                    logger.error(f"Error validating hotel data for document {doc.id}: {str(e)}")
 
         return hotels
 
