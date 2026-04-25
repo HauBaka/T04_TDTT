@@ -78,5 +78,23 @@ class CollectionUpdateRequest(BaseModel):
     # tags: list[Modification] | None = None
     visibility: CollectionVisibility | None = None
 
+class AddMultiplePlacesRequest(BaseModel):
+    place_ids: list[str] = Field(..., min_length=1, max_length=50)
+
+class AddMultipleCollaboratorsRequest(BaseModel):
+    collaborator_uids: list[str] = Field(..., min_length=1, max_length=50)
+
+class AddMultipleTagsRequest(BaseModel):
+    tags: list[str] = Field(..., min_length=1, max_length=50)
+
+class RemoveMultiplePlacesRequest(BaseModel):
+    place_ids: list[str] = Field(..., min_length=1, max_length=50)
+
+class RemoveMultipleCollaboratorsRequest(BaseModel):
+    collaborator_uids: list[str] = Field(..., min_length=1, max_length=50)
+
+class RemoveMultipleTagsRequest(BaseModel):
+    tags: list[str] = Field(..., min_length=1, max_length=50)
+
 class CollectionResponse(BaseModel):
     collection: CollectionPublic | CollectionUnlisted | CollectionPrivate

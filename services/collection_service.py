@@ -69,6 +69,30 @@ class CollectionService:
         
         return self.build_response(updated_data)
         
+    async def add_places_to_collection(self, collection_id: str, requester_id: str, place_ids: list[str]) -> ResponseSchema[CollectionResponse]:
+        """Thêm nhiều địa điểm vào một collection."""
+        return self.build_response({})
+
+    async def remove_places_from_collection(self, collection_id: str, requester_id: str, place_ids: list[str]) -> ResponseSchema[CollectionResponse]:
+        """Xóa nhiều địa điểm khỏi một collection."""
+        return self.build_response({})
+    
+    async def add_collaborators_to_collection(self, collection_id: str, requester_id: str, collaborator_uids: list[str]) -> ResponseSchema[CollectionResponse]:
+        """Thêm nhiều cộng tác viên vào một collection. Gửi invitation"""
+        return self.build_response({})
+    
+    async def remove_collaborators_from_collection(self, collection_id: str, requester_id: str, collaborator_uids: list[str]) -> ResponseSchema[CollectionResponse]:
+        """Xóa nhiều cộng tác viên khỏi một collection. Gửi notification"""
+        return self.build_response({})
+    
+    async def add_tags_to_collection(self, collection_id: str, requester_id: str, tags: list[str]) -> ResponseSchema[CollectionResponse]:
+        """Thêm nhiều tag vào một collection."""
+        return self.build_response({})
+
+    async def remove_tags_from_collection(self, collection_id: str, requester_id: str, tags: list[str]) -> ResponseSchema[CollectionResponse]:
+        """Xóa nhiều tag khỏi một collection."""
+        return self.build_response({})
+
     async def delete_collection(self, collection_id: str, requester_id: str) -> ResponseSchema[bool]:
         """Xóa một collection."""
         collection = await collection_repo.get_collection(collection_id)
