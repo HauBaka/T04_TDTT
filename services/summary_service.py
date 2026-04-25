@@ -164,7 +164,8 @@ class SummaryService:
 
         for place in filtered_places:
             # Lấy dữ liệu cần thiết để gọi AI Summary
-            user_reviews = place.analyzed_reviews 
+            sentiment_meta = place.ai_sentiment
+            user_reviews = sentiment_meta.analyzed_reviews if sentiment_meta else []
             amenities = place.amenities
             nearby_places = place.nearby_places
             
@@ -172,7 +173,7 @@ class SummaryService:
             
             # 2. Kiểm tra đã có ai_summary và ai_summary_expiration_date chưa
             ai_summary = place.ai_summary
-            expiration_date = place.ai_summary_expiration_date # Sử dụng datetime
+            expiration_date = ai_summary.ai_summary_expiration_date if ai_summary else None
 
             if ai_summary and expiration_date and now < expiration_date:
                 # Nếu đã có tóm tắt và còn hạn, không cần gọi AI
@@ -212,11 +213,11 @@ class SummaryService:
                         notes="Không thể tổng hợp bằng AI lúc này."
                     )
                     # Đặt ngày hết hạn là thời điểm hiện tại (now) để lần tìm kiếm sau nó tự động gọi lại AI thay vì bị kẹt 14 ngày
-                    place.ai_summary_expiration_date = now
+                    place.ai_summary.ai_summary_expiration_date = now
                     continue
 
                 # Cập nhật kết quả AI vào Place
                 place.ai_summary = summary
-                place.ai_summary_expiration_date = new_expiration_date
+                place.ai_summary.ai_summary_expiration_date = new_expiration_date
 
 summary_service = SummaryService()

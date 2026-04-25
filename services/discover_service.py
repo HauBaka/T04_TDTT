@@ -12,9 +12,9 @@ from loguru import logger
 import asyncio
 
 class DiscoverService:
-    def __init__(self, payload: DiscoverRequest, requester_username: str | None = None):
+    def __init__(self, payload: DiscoverRequest, requester_uid: str | None = None):
         self.payload = payload
-        self.requester_username = requester_username
+        self.requester_uid = requester_uid
         self.sentiment_service = sentiment_service
 
     async def raw_search(self) -> list[DiscoverHotel]:
@@ -96,7 +96,7 @@ class DiscoverService:
         except Exception as exc:
             logger.warning(f"Không xây dựng được weather context cho pipeline: {str(exc)}")
 
-        raw_results = await hotel_ranking_service.rank_discovered_hotels(raw_results, self.payload, weather_by_identity=weather_by_identity, requester_username=self.requester_username)
+        raw_results = await hotel_ranking_service.rank_discovered_hotels(raw_results, self.payload, weather_by_identity=weather_by_identity, requester_uid=self.requester_uid)
         # await summary_service.process_places_ai_summary(raw_results, weather_by_identity=weather_by_identity) XXX: quá nghèo để có thể gọi AI Summary, tạm thời để sau
         # Chạy ngầm
         asyncio.create_task(

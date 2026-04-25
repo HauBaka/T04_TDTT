@@ -4,7 +4,7 @@ from externals.PhoBERT import PhoBERT
 import re
 import logging
 import asyncio
-from schemas.discover_schema import AnalyzedReview, DiscoverHotel, UserReview
+from schemas.discover_schema import AISentimentResult, AnalyzedReview, DiscoverHotel, UserReview
 
 logger = logging.getLogger(__name__)
 REAL_RATING_CACHE_EXPIRATION_DAYS=7
@@ -149,8 +149,9 @@ class SentimentService:
         now = datetime.now(timezone.utc)
 
         for place in filtered_places:
-            expiration_date = place.ai_score_expiration_date # Sử dụng datetime để so sánh, tránh chuyển đổi qua lại giữa string và datetime
-            has_cache = len(place.analyzed_reviews) > 0 # Đã có AI review chưa
+            sentiment_meta = place.ai_sentiment
+            expiration_date = sentiment_meta.ai_score_expiration_date if sentiment_meta else None
+            has_cache = bool(sentiment_meta and sentiment_meta.analyzed_reviews) # Đã có AI review chưa
 
             if has_cache and (expiration_date and now < expiration_date):
                 # Nếu đã có ai review và còn hạn, thì không cần tính lại
@@ -160,10 +161,12 @@ class SentimentService:
             raw_reviews = place.user_reviews # luôn có trường này
             if not raw_reviews or len(raw_reviews) == 0:
                 # Nếu không có review nào, không thể tính điểm đánh giá thực tế, gán mặc định để tránh lỗi
-                place.ai_score = place.raw_rating 
-                place.analyzed_reviews = []
-                place.ai_score_expiration_date = now + timedelta(days=REAL_RATING_CACHE_EXPIRATION_DAYS)
-                place.trust_weight = 0.0 # Không có review nào -> không đáng tin cậy
+                if place.ai_sentiment is None:
+                    place.ai_sentiment = AISentimentResult()
+                place.ai_sentiment.ai_score = place.raw_rating
+                place.ai_sentiment.ai_score_expiration_date = now + timedelta(days=REAL_RATING_CACHE_EXPIRATION_DAYS)
+                place.ai_sentiment.trust_weight = 0.0 # Không có review nào -> không đáng tin cậy
+                place.ai_sentiment.analyzed_reviews = []
                 continue
 
             # Đưa vào hàng đợi để gọi AI xử lí song song
@@ -179,18 +182,22 @@ class SentimentService:
             for place, result in zip(places_needing_calculation, results):
                 if isinstance(result, BaseException):
                     # Nếu có lỗi khi gọi AI, gán mặc định tạm thời để tránh bị kẹt 7 ngày không có điểm đánh giá nào cả
-                    place.ai_score = place.raw_rating  # Hoặc có thể gán một giá trị mặc định nào đó
-                    place.analyzed_reviews = []
-                    place.ai_score_expiration_date = now
-                    place.trust_weight = 0.0
+                    if place.ai_sentiment is None:
+                        place.ai_sentiment = AISentimentResult()
+                    place.ai_sentiment.ai_score = place.raw_rating
+                    place.ai_sentiment.ai_score_expiration_date = now
+                    place.ai_sentiment.trust_weight = 0.0
+                    place.ai_sentiment.analyzed_reviews = []
                     continue
 
                 # Gán kết quả AI vào Place
                 real_rating, trust_weight, analyzed_reviews = result
-                place.ai_score = real_rating
-                place.trust_weight = trust_weight
-                place.analyzed_reviews = analyzed_reviews
-                place.ai_score_expiration_date = new_expiration_date
+                if place.ai_sentiment is None:
+                    place.ai_sentiment = AISentimentResult()
+                place.ai_sentiment.ai_score = real_rating
+                place.ai_sentiment.ai_score_expiration_date = new_expiration_date
+                place.ai_sentiment.trust_weight = trust_weight
+                place.ai_sentiment.analyzed_reviews = analyzed_reviews
     
 
 sentiment_service = SentimentService()

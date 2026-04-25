@@ -65,25 +65,30 @@ class DiscoverRequest(BaseModel):
 # CÁC CLASS AI & REVIEWS
 # ==============================
 
-# Review sau khi phân tích cảm xúc
-class AnalyzedReview(BaseModel): # TODO: Gộp chung với UserReview để đỡ lặp
-    text: str
-    raw_stars: float
-    sentiment_score: float    # Điểm do PhoBERT chấm
-    trust_weight: float       # Trọng số tin cậy của review (0.0 -> 1.0)
-    adjusted_stars: float     # Điểm sau khi đối soát (kết hợp raw_stars và sentiment_score)
-    
-# Tóm tắt AI cho review
-class AIReviewSummary(BaseModel): # TODO: Chuyển exp date vô đây + score
-    overview: str | None = None
-    pros: list[str] | None = None
-    cons: list[str] | None = None
-    notes: str | None = None
-
 # Review gốc từ người dùng
 class UserReview(BaseModel):
     text: str
     raw_stars: float
+
+# Review sau khi phân tích cảm xúc
+class AnalyzedReview(UserReview):
+    sentiment_score: float    # Điểm do PhoBERT chấm
+    trust_weight: float       # Trọng số tin cậy của review (0.0 -> 1.0)
+    adjusted_stars: float     # Điểm sau khi đối soát (kết hợp raw_stars và sentiment_score)
+
+class AISentimentResult(BaseModel):
+    ai_score: float | None = None
+    ai_score_expiration_date: datetime | None = None
+    trust_weight: float = 0.0
+    analyzed_reviews: list[AnalyzedReview] = []
+    
+# Tóm tắt AI cho review
+class AIReviewSummary(BaseModel):
+    ai_summary_expiration_date: datetime | None = None
+    overview: str | None = None
+    pros: list[str] | None = None
+    cons: list[str] | None = None
+    notes: str | None = None
 
 # ==========================================
 # CÁC CLASS DATA KHÁC
@@ -154,11 +159,7 @@ class DiscoverHotel(BaseModel):
     user_reviews: list[UserReview] = [] # Danh sách review gốc (chưa phân tích)
 
     # Ai phân tích lại
-    ai_score: float = 0.0
-    trust_weight: float  = 0.0     # Trọng số tin cậy tổng thể của khách sạn (0.0 -> 1.0)
-    analyzed_reviews: list[AnalyzedReview] = [] # Danh sách các review đã được phân tích
-    ai_score_expiration_date: datetime | None = None  # ISO format date string cho ngày hết hạn của ai_score
-    ai_summary_expiration_date: datetime | None = None # ISO format date string cho ngày hết hạn của ai_summary
+    ai_sentiment: AISentimentResult | None = None
     ai_summary: AIReviewSummary | None = None     # Tóm tắt do AI tạo ra, có thể hết hạn và cần được làm mới
 
     # updates
