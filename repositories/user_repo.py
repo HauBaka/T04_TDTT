@@ -1,45 +1,34 @@
 from core.database import get_db
-
-class UserRepository:
+from repositories.base_repo import BaseRepository
+class UserRepository(BaseRepository):
     def __init__(self):
-        self.user_collection = "users"
-
-    def _get_db(self):
-        return get_db()
+        super().__init__("users")
     
     async def get_user(self, uid: str) -> dict | None:
-        doc = await self._get_db().collection(self.user_collection).document(uid).get()
-        return doc.to_dict() if doc.exists else None
+        return await self._get_by_id(uid)
     
     async def create_user(self, user_data: dict) -> str | None:
         uid = user_data.get("uid")
         if not uid:
             return None
-        await self._get_db().collection(self.user_collection).document(uid).set(user_data)
+        await self._create(user_data, uid)
         return uid
         
     async def update_user(self, uid: str, update_data: dict) -> None:
         # NOTE: Để service xử lý exceptions
-        await self._get_db().collection(self.user_collection).document(uid).update(update_data)
+        await self._update(uid, update_data)
 
     async def delete_user(self, uid: str) -> bool:
-        doc_ref = self._get_db().collection(self.user_collection).document(uid)
-        doc = await doc_ref.get()
-        
-        if not doc.exists:
-            return False
-
-        await doc_ref.delete()
-        return True
+        return await self._delete(uid)
 
     async def get_user_by_username(self, username: str) -> dict | None:
-        docs = await self._get_db().collection(self.user_collection).where("username_lower", "==", username.lower()).limit(1).get()
+        docs = await self._collection.where("username_lower", "==", username.lower()).limit(1).get()
         for doc in docs:
             return doc.to_dict()
         return None
 
     async def get_user_by_email(self, email: str) -> dict | None:
-        docs = await self._get_db().collection(self.user_collection).where("email", "==", email.lower()).limit(1).get()
+        docs = await self._collection.where("email", "==", email.lower()).limit(1).get()
 
         for doc in docs:
             return doc.to_dict()
