@@ -26,7 +26,7 @@ from schemas.user_preference_schema import (
     UserTravelPreference,
     WeatherTolerance,
 )
-from services.user_service import user_service
+from repositories.user_repo import user_repo
 from services.semantic_encoder import semantic_text_encoder
 
 # Map tiếng anh sang tiếng việt (nếu đầu vào lỡ tiếng anh)
@@ -346,9 +346,11 @@ class HotelRankingService:
 
     # Chấm điểm rating thực tế của khách sạn.
     def _real_rating_score(self, hotel: DiscoverHotel) -> float:
-        if hotel.ai_score <= 0:
+        sentiment = hotel.ai_sentiment
+        ai_score = sentiment.ai_score if sentiment and sentiment.ai_score is not None else 0.0
+        if ai_score <= 0:
             return 0.5
-        return self._clamp(hotel.ai_score / 5.0, 0.0, 1.0)
+        return self._clamp(ai_score / 5.0, 0.0, 1.0)
     
     # Chấm mức khớp giữa khách sạn và sở thích bền vững của người dùng.
     def _profile_match_score(
@@ -537,9 +539,13 @@ class HotelRankingService:
     
     # Chấm độ tin cậy của dữ liệu đầu vào cho khách sạn.
     def _confidence_score(self, hotel: DiscoverHotel) -> float:
-        review_density = min(1.0, len(hotel.analyzed_reviews) / 8.0)
-        trust = self._clamp(hotel.trust_weight, 0.0, 1.0)
-        if hotel.ai_score <= 0 and not hotel.analyzed_reviews:
+        sentiment = hotel.ai_sentiment
+        ai_score = sentiment.ai_score if sentiment and sentiment.ai_score is not None else 0.0
+        analyzed_reviews = sentiment.analyzed_reviews if sentiment else []
+        trust_weight = sentiment.trust_weight if sentiment else 0.0
+        review_density = min(1.0, len(analyzed_reviews) / 8.0)
+        trust = self._clamp(trust_weight, 0.0, 1.0)
+        if ai_score <= 0 and not analyzed_reviews:
             return 0.55
         return self._clamp(0.55 + 0.25 * trust + 0.20 * review_density, 0.0, 1.0)
     
@@ -892,7 +898,7 @@ class HotelRankingService:
         places: list[DiscoverHotel],
         payload: DiscoverRequest,
         weather_by_identity: dict[str, list[WeatherInfo]] | None = None,
-        requester_username: str | None = None, # TODO: thay thành uid sẽ tối ưu hơn
+        requester_uid: str | None = None,
     ) -> list[DiscoverHotel]:
         if not places:
             return places
@@ -902,15 +908,13 @@ class HotelRankingService:
         history: list[UserBehaviorEvent] = []
         scoring_weights: ScoringWeights | None = None
 
-        if requester_username:
+        if requester_uid:
             try:
-                profile_response = await user_service.get_profile( # TODO: Nên dùng uid + user_repo
-                    requester_uid=None,
-                    target_username=requester_username,
-                )
-                private_user = profile_response.data
+                private_user = await user_repo.get_user(requester_uid)
+                if not private_user:
+                    private_user = {}
 
-                profile_data = getattr(private_user, "travel_profile", None)
+                profile_data = private_user.get("travel_profile")
                 if isinstance(profile_data, UserTravelPreference):
                     profile = profile_data
                 elif isinstance(profile_data, dict):
@@ -919,7 +923,7 @@ class HotelRankingService:
                     except Exception:
                         profile = UserTravelPreference()
 
-                collection_data = getattr(private_user, "collections", [])
+                collection_data = private_user.get("collections", [])
                 if isinstance(collection_data, list):
                     parsed_collections: list[CollectionPublic] = []
                     for item in collection_data:
@@ -932,7 +936,7 @@ class HotelRankingService:
                                 continue
                     collections = parsed_collections[:50]
 
-                history_data = getattr(private_user, "user_behavior_history", [])
+                history_data = private_user.get("user_behavior_history", [])
                 if isinstance(history_data, list):
                     parsed_history: list[UserBehaviorEvent] = []
                     for event in history_data:
@@ -945,7 +949,7 @@ class HotelRankingService:
                                 continue
                     history = parsed_history[:100]
 
-                weight_data = getattr(private_user, "scoring_weights", None)
+                weight_data = private_user.get("scoring_weights")
                 if isinstance(weight_data, ScoringWeights):
                     scoring_weights = weight_data
                 elif isinstance(weight_data, dict):
