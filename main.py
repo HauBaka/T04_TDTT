@@ -7,6 +7,10 @@ from api.discover import discover_router
 from api.auth import auth_router
 from api.user import user_router
 from api.collection import collection_router
+from api.invitation import invitation_router
+from api.notification import notification_router
+from api.conversation import conversation_router
+from api.trip import trip_router
 from core.database import firebase_manager
 from core.exceptions import AppException
 from mock_data.virtual_review import virtual_review_manager
@@ -45,6 +49,10 @@ app.include_router(discover_router, tags=["discover"])
 app.include_router(auth_router, tags=["auth"])
 app.include_router(user_router, tags=["user"])
 app.include_router(collection_router, tags=["collection"])
+app.include_router(invitation_router, tags=["invitation"])
+app.include_router(notification_router, tags=["notification"])
+app.include_router(conversation_router, tags=["conversation"])
+app.include_router(trip_router, tags=["trip"])
 # Xử lý các lỗi
 @app.exception_handler(AppException) # Xử lý lỗi ứng dụng
 async def app_exception_handler(request: Request, exc: AppException):

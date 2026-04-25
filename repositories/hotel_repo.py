@@ -7,14 +7,12 @@ import asyncio
 import pygeohash as pgh
 from datetime import datetime, timedelta, timezone
 from google.cloud.firestore_v1 import FieldFilter
+from repositories.base_repo import BaseRepository
 
-class HotelRepository:
+class HotelRepository(BaseRepository):
     def __init__(self):
-        self.hotel_collection = "hotels"
+        super().__init__("hotels")
         self.BATCH_LIMIT = 490 # Tối đa chỉ được 500 document trong một batch
-
-    def _get_db(self):
-        return get_db()
     
     async def _commit_batch(self, batch, retries=2):
         for attempt in range(retries + 1):
@@ -41,7 +39,7 @@ class HotelRepository:
             
             hotel.last_updated = now
 
-            ref = self._get_db().collection(self.hotel_collection).document(hotel.property_token)
+            ref = self._collection.document(hotel.property_token)
 
             data = hotel.model_dump(exclude_none=True)
             if "added_at" not in data:
@@ -67,7 +65,7 @@ class HotelRepository:
         count = 0
 
         for token in property_tokens:
-            ref = self._get_db().collection(self.hotel_collection).document(token)
+            ref = self._collection.document(token)
             batch.delete(ref)
             count += 1
 
@@ -129,7 +127,7 @@ class HotelRepository:
         for h in hashes:
             start_hash = h
             end_hash = h + "~"
-            docs = self._get_db().collection(self.hotel_collection).where(filter=FieldFilter("gps_coordinates.geohash", ">=", start_hash)).where(filter=FieldFilter("gps_coordinates.geohash", "<=", end_hash)).stream()
+            docs = self._collection.where(filter=FieldFilter("gps_coordinates.geohash", ">=", start_hash)).where(filter=FieldFilter("gps_coordinates.geohash", "<=", end_hash)).stream()
             
             async for doc in docs:
                 if doc.id in seen_ids: # skip repeated document
