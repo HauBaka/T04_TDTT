@@ -26,6 +26,7 @@ from schemas.user_preference_schema import (
     UserTravelPreference,
     WeatherTolerance,
 )
+from externals.SemanticModel import semantic_model_client
 from repositories.user_repo import user_repo
 from services.semantic_encoder import semantic_text_encoder
 
@@ -80,6 +81,8 @@ SINH_NGHIA_MAP = {
 
 _NON_WORD_RE = re.compile(r"[^\w\s]+", flags=re.UNICODE)
 _MULTI_SPACE_RE = re.compile(r"\s+")
+_ALPHA_TOKEN_RE = re.compile(r"[a-z]")
+_MODEL_MIN_TOKEN_LEN = 2
 _SINH_NGHIA_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = tuple(
     (
         re.compile(rf"\b{re.escape(english_phrase)}\b", flags=re.UNICODE),
@@ -124,13 +127,61 @@ def normalize_text(text: str) -> str:
 
     return cleaned
 
-# Tách text thành tokens sau khi đã được normalize, dùng để so sánh với các tập token của khách sạn, bộ sưu tập, sự kiện lịch sử,..
 @lru_cache(maxsize=4096)
-def tokenize_text(text: str) -> tuple[str, ...]:
+def _model_tokenize_text(text: str) -> tuple[str, ...]:
     normalized = normalize_text(text)
     if not normalized:
         return tuple()
-    return tuple(normalized.split())
+
+    try:
+        semantic_model_client.load_model()
+        tokenizer = semantic_model_client.tokenizer
+    except Exception as exc:
+        logger.warning(f"Không bật được model tokenizer cho ranking: {str(exc)}")
+        return tuple()
+
+    try:
+        pieces = tokenizer.tokenize(normalized)
+    except Exception:
+        return tuple()
+
+    tokens: list[str] = []
+    for piece in pieces:
+        cleaned_piece = piece.replace("##", "").replace("▁", " ").strip()
+        cleaned_piece = _NON_WORD_RE.sub(" ", cleaned_piece)
+        cleaned_piece = _MULTI_SPACE_RE.sub(" ", cleaned_piece).strip()
+        if not cleaned_piece:
+            continue
+        for word in cleaned_piece.split():
+            if len(word) < _MODEL_MIN_TOKEN_LEN:
+                continue
+            if not _ALPHA_TOKEN_RE.search(word):
+                continue
+            tokens.append(word)
+
+    return tuple(dict.fromkeys(tokens))
+
+# Tách text thành tokens sau khi đã được normalize, dùng để so sánh với các tập token của khách sạn, bộ sưu tập, sự kiện lịch sử,..
+@lru_cache(maxsize=4096)
+def tokenize_text(text: str, use_model_tokens: bool = False) -> tuple[str, ...]:
+    normalized = normalize_text(text)
+    if not normalized:
+        return tuple()
+
+    words = [word for word in normalized.split() if word]
+    if not words:
+        return tuple()
+
+    # Giữ unigram như cũ, thêm bigram để tăng khả năng match cụm từ ngắn.
+    tokens: list[str] = list(words)
+    tokens.extend(f"{left} {right}" for left, right in zip(words, words[1:]))
+
+    # Chỉ trộn token model cho text tự do để giảm nhiễu lên field có cấu trúc.
+    if use_model_tokens:
+        tokens.extend(_model_tokenize_text(text))
+
+    # Loại trùng nhưng giữ thứ tự xuất hiện để đảm bảo kết quả ổn định.
+    return tuple(dict.fromkeys(tokens))
 
 # Lớp lưu trữ các tín hiệu liên quan đến khách sạn được sử dụng trong quá trình xếp hạng.
 @dataclass(frozen=True)
@@ -582,7 +633,7 @@ class HotelRankingService:
     
     # So khớp ghi chú tự do của user với khách sạn.
     def _free_text_match_score(self, note: str, hotel: DiscoverHotel) -> float:
-        tokens = self._tokenize(note)
+        tokens = self._tokenize(note, use_model_tokens=True)
         hotel_tokens = self._hotel_feature_tokens(hotel)
         if not tokens:
             return 0.5
@@ -591,9 +642,9 @@ class HotelRankingService:
     def _hotel_feature_tokens(self, hotel: DiscoverHotel) -> set[str]:
         # Lấy token đặc trưng của khách sạn, không tính điểm gần đó.
         tokens = set(self._tokenize(hotel.name))
-        tokens.update(self._tokenize(hotel.description or ""))
+        tokens.update(self._tokenize(hotel.description or "", use_model_tokens=True))
         tokens.update(self._tokenize(hotel.address or ""))
-        tokens.update(self._tokenize(hotel.deal or ""))
+        tokens.update(self._tokenize(hotel.deal or "", use_model_tokens=True))
         tokens.update(self._tokenize(" ".join(hotel.amenities)))
         return tokens
 
@@ -603,7 +654,7 @@ class HotelRankingService:
         for nearby_place in hotel.nearby_places:
             tags.update(self._tokenize(nearby_place.category or ""))
             tags.update(self._tokenize(nearby_place.name))
-            tags.update(self._tokenize(nearby_place.description or ""))
+            tags.update(self._tokenize(nearby_place.description or "", use_model_tokens=True))
         if hotel.address:
             tags.update(self._tokenize(hotel.address))
         return tags
@@ -611,7 +662,7 @@ class HotelRankingService:
     def _collection_tokens(self, collection: CollectionPublic) -> set[str]:
         # Lấy token đặc trưng từ bộ sưu tập.
         tokens = set(self._tokenize(collection.name))
-        tokens.update(self._tokenize(collection.description or ""))
+        tokens.update(self._tokenize(collection.description or "", use_model_tokens=True))
         tokens.update(self._tokenize(" ".join(collection.tags)))
         for place in collection.places:
             place_id = getattr(place, "place_id", "")
@@ -623,7 +674,7 @@ class HotelRankingService:
         # Lấy token từ một sự kiện hành vi.
         tokens = set(self._tokenize(event.hotel_name or ""))
         tokens.update(self._tokenize(event.hotel_id or ""))
-        tokens.update(self._tokenize(" ".join(event.metadata.values())))
+        tokens.update(self._tokenize(" ".join(event.metadata.values()), use_model_tokens=True))
         return tokens
 
     # Chuẩn hoá và mở rộng token tiện ích (có cả cụm từ + đồng nghĩa).
@@ -878,8 +929,8 @@ class HotelRankingService:
         return self._clamp((0.65 * rule_score) + (0.35 * semantic_score), 0.0, 1.0)
 
     # Bọc lại hàm tokenize cho gọn.
-    def _tokenize(self, text: str) -> list[str]:
-        return list(tokenize_text(text))
+    def _tokenize(self, text: str, use_model_tokens: bool = False) -> list[str]:
+        return list(tokenize_text(text, use_model_tokens))
 
     # Bọc lại hàm normalize cho gọn.
     def _normalize_token(self, text: str) -> str:
