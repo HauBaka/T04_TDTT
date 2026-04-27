@@ -95,7 +95,22 @@ class ConversationService:
                 updated_at=datetime.now(), 
                 members=[])
             )
-    
 
+    # Sếp bảo ai làm conversation thì hoàn thiện 2 hàm dưới đây nhé
+    async def get_or_create_default_chatbot_conversation(self, uid: str) -> ResponseSchema[ConversationResponse]:
+        """Lấy conversation mặc định cho chatbot của user, nếu chưa có thì tạo mới."""
+        return ResponseSchema(data=ConversationResponse(
+            id=f"chatbot_conv_{uid}",
+            owner_uid=uid,
+            name="Chatbot Assistant",
+            description="Default chatbot conversation",
+            created_at=datetime.now(),
+            updated_at=datetime.now(),
+            members=[]
+        ))
+
+    async def get_recent_messages(self, conversation_id: str, limit: int = 20) -> ResponseSchema[list]:
+        """Lấy danh sách tin nhắn gần nhất của conversation."""
+        return ResponseSchema(data=[])
 
 conversation_service = ConversationService()
