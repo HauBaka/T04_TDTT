@@ -99,7 +99,7 @@ class TripRepository(BaseRepository):
         if payload:
             await ref.update(payload)
         doc = await ref.get()
-        if not doc.exist:
+        if not doc.exists:
             return None
         member_data = doc.to_dict()
         member_data["uid"] = doc.id
