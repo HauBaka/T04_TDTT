@@ -82,7 +82,6 @@ class DiscoverService:
         raw_results = list(hotel_dict.values())
 
         await self.get_reviews(raw_results)
-        await self.sentiment_service.process_places_real_rating(raw_results)
         
         weather_by_identity: dict[str, list[WeatherInfo]] = {}
         try:
@@ -97,9 +96,14 @@ class DiscoverService:
             logger.warning(f"Không xây dựng được weather context cho pipeline: {str(exc)}")
 
         raw_results = await hotel_ranking_service.rank_discovered_hotels(raw_results, self.payload, weather_by_identity=weather_by_identity, requester_uid=self.requester_uid)
-        # await summary_service.process_places_ai_summary(raw_results, weather_by_identity=weather_by_identity) XXX: quá nghèo để có thể gọi AI Summary, tạm thời để sau
+        
         # Chạy ngầm
+        async def background_tasks(hotels):
+            await self.sentiment_service.process_places_real_rating(hotels)
+            await summary_service.process_places_ai_summary(hotels, weather_by_identity=weather_by_identity)
+            await hotel_repo.sync_hotels_background(hotels)
+            
         asyncio.create_task(
-            hotel_repo.sync_hotels_background(raw_results) 
+            background_tasks(raw_results) 
         )
         return raw_results
