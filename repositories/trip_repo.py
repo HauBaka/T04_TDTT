@@ -70,7 +70,7 @@ class TripRepository(BaseRepository):
         db = self._get_db()
         ref = db.collection("trips").document(trip_id).collection("members").document(uid)
         doc = await ref.get()
-        if not doc.exist:
+        if not doc.exists:
             return None
         deleted_data = doc.to_dict()
         deleted_data["uid"] = doc.id
@@ -99,7 +99,7 @@ class TripRepository(BaseRepository):
         if payload:
             await ref.update(payload)
         doc = await ref.get()
-        if not doc.exist:
+        if not doc.exists:
             return None
         member_data = doc.to_dict()
         member_data["uid"] = doc.id
