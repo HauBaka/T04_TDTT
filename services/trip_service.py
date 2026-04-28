@@ -1,92 +1,167 @@
 
-from datetime import datetime
-
+from datetime import datetime, timezone
+from core.exceptions import AppException, NotFoundError
+from schemas.response_schema import ResponseSchema
 from schemas.response_schema import ResponseSchema
 from schemas.trip_schema import TripCreateRequest, TripResponse, TripStatus, TripUpdateRequest
-
+from repositories.trip_repo import trip_repo
+from repositories.user_repo import user_repo
 
 class TripService:
     """Service xử lý logic nghiệp vụ liên quan đến Trip."""
-    
+    def __init__(self):
+        self.trip_repo = trip_repo
+        self.user_repo = user_repo
+        
     async def create_trip(self, creator_uid: str, trip_data: TripCreateRequest) -> ResponseSchema[TripResponse]:
         """Tạo một trip mới."""
-        return ResponseSchema(data=TripResponse(
-            id="",
-            owner_uid="",
-            name="",
-            place_id="",
-            start_at=datetime.now(),
-            end_at=datetime.now(),
-            status=TripStatus.WAITING,
-            member_uids=[],
-            created_at=datetime.now(),
-            updated_at=datetime.now()
-        ))
+        creator_info = await self.user_repo.get_user(creator_uid)
+        if not creator_info:
+            raise NotFoundError("Creator user not found.")
+        
+        # Tạo trip mới
+        new_trip = await self.trip_repo.create(creator_uid, trip_data.model_dump())
+        if not new_trip:
+            raise AppException(status_code=500, message="Failed to create trip.")
+        
+        trip_id = new_trip.get("id")
+        if not trip_id:
+            raise AppException(status_code = 500, message = "Trip ID is missing after creation.")
+        member_data = {
+            "display_name": creator_info.get("display_name", "Unknown"),
+            "avatar_url": creator_info.get("avatar_url"),
+            "role": "owner"
+        }
+        await self.trip_repo.add_member_to_subcollection(trip_id, creator_uid, member_data)
+        
+        return ResponseSchema(
+            message="Trip created successfully",
+            data=TripResponse(**new_trip))
     
     async def get_trip(self, trip_id: str, requester_uid: str | None) -> ResponseSchema[TripResponse]:
         """Lấy thông tin một trip theo ID."""
-        return ResponseSchema(data=TripResponse(
-            id=trip_id,
-            owner_uid="owner_uid",
-            name="Sample Trip",
-            place_id="sample_place_id",
-            start_at=datetime.now(),
-            end_at=datetime.now(),
-            status=TripStatus.ACTIVE,
-            member_uids=["uid1", "uid2"],
-            created_at=datetime.now(),
-            updated_at=datetime.now()
-        ))
+        trip = await self.trip_repo.get_by_id(trip_id)
+        if not trip:
+            raise NotFoundError("Trip not found.")
+        member_uids = trip.get("member_uids", [])
+        if requester_uid and requester_uid not in member_uids:
+            raise AppException(status_code=403, message="You are not a member of this trip.")
+        
+        return ResponseSchema(data=TripResponse(**trip))
     
     async def update_trip(self, trip_id: str, requester_uid: str, update_data: TripUpdateRequest) -> ResponseSchema[TripResponse]:
         """Cập nhật thông tin một trip."""
-        return ResponseSchema(data=TripResponse(
-            id=trip_id,
-            owner_uid="owner_uid",
-            name="Sample Trip",
-            place_id="sample_place_id",
-            start_at=datetime.now(),
-            end_at=datetime.now(),
-            status=TripStatus.ACTIVE,
-            member_uids=["uid1", "uid2"],
-            created_at=datetime.now(),
-            updated_at=datetime.now()
-        ))
+        trip = await self.trip_repo.get_by_id(trip_id)
+        if not trip:
+            raise NotFoundError("Trip not found.")
+        owner_uid = trip.get("owner_uid")
+        if requester_uid != owner_uid:
+            raise AppException(status_code=403, message="Only the trip owner can update this trip.")
+        trip_status = trip.get("status", TripStatus.WAITING.value)
+        if trip_status != TripStatus.WAITING.value:
+            raise AppException(
+                status_code=400, 
+                message="Can only update trip details when status is WAITING."
+            )
+        update_payload = update_data.model_dump(exclude_unset=True)
+        updated_trip = await self.trip_repo.update(trip_id, update_payload)
+        
+        if not updated_trip:
+            raise AppException(status_code=500, message="Failed to update trip.")
+        
+        return ResponseSchema(data=TripResponse(**updated_trip))
     
     async def delete_trip(self, trip_id: str, requester_uid: str) -> ResponseSchema[bool]:
         """Xóa một trip."""
-        return ResponseSchema(data=True)
+        trip = await self.trip_repo.get_by_id(trip_id)
+        if not trip:
+            raise NotFoundError("Trip not found.")
+        owner_uid = trip.get("owner_uid")
+        if requester_uid != owner_uid:
+            raise AppException(status_code=403, message="Only the trip owner can delete this trip.")
+        success = await self.trip_repo.delete(trip_id)
+        if not success:
+            raise AppException(status_code=500, message="Failed to delete trip.")
+        
+        return ResponseSchema(message="Trip deleted successfully", data=success)
     
     async def add_members_to_trip(self, trip_id: str, requester_uid: str, member_uids: list[str]) -> ResponseSchema[TripResponse]:
         """Thêm nhiều thành viên vào một trip."""
-        return ResponseSchema(data=TripResponse(
-            id=trip_id,
-            owner_uid="owner_uid",
-            name="Sample Trip",
-            place_id="sample_place_id",
-            start_at=datetime.now(),
-            end_at=datetime.now(),
-            status=TripStatus.ACTIVE,
-            member_uids=["uid1", "uid2"] + member_uids,
-            created_at=datetime.now(),
-            updated_at=datetime.now()
-        ))
-    
+        if not member_uids:
+            raise AppException(status_code=400, message="Member list cannot be empty.")
+        
+        trip = await self.trip_repo.get_by_id(trip_id)
+        if not trip:
+            raise NotFoundError("Trip not found.")
+        current_members = trip.get("member_uids", [])
+        if requester_uid not in current_members:
+            raise AppException(status_code=403, message="You must be a member to add others.")
+        new_member_uids = [uid for uid in member_uids if uid not in current_members]
+        
+        if not new_member_uids:
+            raise AppException(status_code=400, message="All members are already in this trip.")
+        for uid in new_member_uids:
+            user_info = await self.user_repo.get_user(uid)
+            if not user_info:
+                raise NotFoundError(f"User {uid} not found.")
+        updated_trip = await self.trip_repo.add_members(trip_id, new_member_uids)
+        
+        if not updated_trip:
+            raise AppException(status_code=500, message="Failed to add members to trip.")
+        
+        for uid in new_member_uids:
+            user_info = await self.user_repo.get_user(uid)
+            if user_info:
+                member_data = {
+                    "display_name": user_info.get("display_name", "Unknown"),
+                    "avatar_url": user_info.get("avatar_url"),
+                    "role": "member"
+                }
+                await self.trip_repo.add_member_to_subcollection(trip_id, uid, member_data)
+        
+        return ResponseSchema(data=TripResponse(**updated_trip))
     async def remove_members_from_trip(self, trip_id: str, requester_uid: str, target_uids: list[str]) -> ResponseSchema[TripResponse]:
         """Xóa nhiều thành viên khỏi một trip."""
-        existing_members = ["uid1", "uid2", "uid3"]  # Giả sử đây là danh sách thành viên hiện tại
-        updated_members = [uid for uid in existing_members if uid not in target_uids]
-        return ResponseSchema(data=TripResponse(
-            id=trip_id,
-            owner_uid="owner_uid",
-            name="Sample Trip",
-            place_id="sample_place_id",
-            start_at=datetime.now(),
-            end_at=datetime.now(),
-            status=TripStatus.ACTIVE,
-            member_uids=updated_members,
-            created_at=datetime.now(),
-            updated_at=datetime.now()
-        ))
+        if not target_uids:
+            raise AppException(status_code=400, message="Target member list cannot be empty.")
+        
+        trip = await self.trip_repo.get_by_id(trip_id)
+        if not trip:
+            raise NotFoundError("Trip not found.")
+        
+        owner_uid = trip.get("owner_uid")
+        current_members = trip.get("member_uids", [])
+        
+        # Kiểm tra không xóa owner
+        if owner_uid in target_uids:
+            raise AppException(status_code=400, message="Cannot remove the trip owner.")
+        
+        # Kiểm tra tất cả target đều là member
+        for uid in target_uids:
+            if uid not in current_members:
+                raise AppException(status_code=400, message=f"User {uid} is not a member of this trip.")
+        
+        # Kiểm tra quyền xóa
+        is_owner = requester_uid == owner_uid
+        
+        if not is_owner:
+            # Member thường chỉ có thể xóa chính mình
+            if len(target_uids) != 1 or target_uids[0] != requester_uid:
+                raise AppException(
+                    status_code=403, 
+                    message="You do not have permission to remove other members."
+                )
+        
+        # Xóa members từ trip
+        updated_trip = await self.trip_repo.remove_members(trip_id, target_uids)
+        
+        if not updated_trip:
+            raise AppException(status_code=500, message="Failed to remove members from trip.")
+        
+        # Xóa member data từ subcollection
+        for uid in target_uids:
+            await self.trip_repo.remove_member_from_subcollection(trip_id, uid)
+        
+        return ResponseSchema(data=TripResponse(**updated_trip))
     
 trip_service = TripService()
