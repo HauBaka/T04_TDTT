@@ -64,5 +64,158 @@ class CollectionRepository(BaseRepository):
         """Lấy thông tin của một collection cụ thể."""
         return await self._get_by_id(collection_id) or {}
 
+    async def add_places_to_collection(self, collection_id: str, places: list[dict]) -> dict:
+        """Thêm nhiều địa điểm vào collection."""
+        ref = self._collection.document(collection_id)
+        snapshot = await ref.get()
+        if not snapshot.exists:
+            return {}
+        
+        current_data = snapshot.to_dict() or {}
+        current_places = current_data.get("places", [])
+        
+        # Thêm places mới
+        current_places.extend(places)
+        
+        update_payload = {
+            "places": current_places,
+            "place_count": len(current_places),
+            "updated_at": datetime.now(timezone.utc)
+        }
+        
+        await ref.update(update_payload)
+        updated_snapshot = await ref.get()
+        collection_data = updated_snapshot.to_dict() or {}
+        collection_data["id"] = ref.id
+        return collection_data
+
+    async def remove_places_from_collection(self, collection_id: str, place_ids: list[str]) -> dict:
+        """Xóa nhiều địa điểm khỏi collection."""
+        ref = self._collection.document(collection_id)
+        snapshot = await ref.get()
+        if not snapshot.exists:
+            return {}
+        
+        current_data = snapshot.to_dict() or {}
+        current_places = current_data.get("places", [])
+        
+        # Loại bỏ places
+        remaining_places = [p for p in current_places if p.get("place_id") not in place_ids]
+        
+        update_payload = {
+            "places": remaining_places,
+            "place_count": len(remaining_places),
+            "updated_at": datetime.now(timezone.utc)
+        }
+        
+        await ref.update(update_payload)
+        updated_snapshot = await ref.get()
+        collection_data = updated_snapshot.to_dict() or {}
+        collection_data["id"] = ref.id
+        return collection_data
+
+    async def add_collaborators_to_collection(self, collection_id: str, collaborators: list[dict]) -> dict:
+        """Thêm nhiều cộng tác viên vào collection."""
+        ref = self._collection.document(collection_id)
+        snapshot = await ref.get()
+        if not snapshot.exists:
+            return {}
+        
+        current_data = snapshot.to_dict() or {}
+        current_collaborators = current_data.get("collaborators", [])
+        
+        # Thêm collaborators mới, tránh duplicate
+        existing_uids = {c.get("uid") for c in current_collaborators if isinstance(c, dict)}
+        for collab in collaborators:
+            if collab.get("uid") not in existing_uids:
+                current_collaborators.append(collab)
+        
+        update_payload = {
+            "collaborators": current_collaborators,
+            "contributor_count": len(current_collaborators),
+            "updated_at": datetime.now(timezone.utc)
+        }
+        
+        await ref.update(update_payload)
+        updated_snapshot = await ref.get()
+        collection_data = updated_snapshot.to_dict() or {}
+        collection_data["id"] = ref.id
+        return collection_data
+
+    async def remove_collaborators_from_collection(self, collection_id: str, collaborator_uids: list[str]) -> dict:
+        """Xóa nhiều cộng tác viên khỏi collection."""
+        ref = self._collection.document(collection_id)
+        snapshot = await ref.get()
+        if not snapshot.exists:
+            return {}
+        
+        current_data = snapshot.to_dict() or {}
+        current_collaborators = current_data.get("collaborators", [])
+        
+        # Loại bỏ collaborators
+        remaining_collaborators = [c for c in current_collaborators if c.get("uid") not in collaborator_uids]
+        
+        update_payload = {
+            "collaborators": remaining_collaborators,
+            "contributor_count": len(remaining_collaborators),
+            "updated_at": datetime.now(timezone.utc)
+        }
+        
+        await ref.update(update_payload)
+        updated_snapshot = await ref.get()
+        collection_data = updated_snapshot.to_dict() or {}
+        collection_data["id"] = ref.id
+        return collection_data
+
+    async def add_tags_to_collection(self, collection_id: str, new_tags: list[str]) -> dict:
+        """Thêm nhiều tag vào collection."""
+        ref = self._collection.document(collection_id)
+        snapshot = await ref.get()
+        if not snapshot.exists:
+            return {}
+        
+        current_data = snapshot.to_dict() or {}
+        current_tags = current_data.get("tags", [])
+        
+        # Thêm tags mới, tránh duplicate
+        for tag in new_tags:
+            if tag not in current_tags:
+                current_tags.append(tag)
+        
+        update_payload = {
+            "tags": current_tags,
+            "updated_at": datetime.now(timezone.utc)
+        }
+        
+        await ref.update(update_payload)
+        updated_snapshot = await ref.get()
+        collection_data = updated_snapshot.to_dict() or {}
+        collection_data["id"] = ref.id
+        return collection_data
+
+    async def remove_tags_from_collection(self, collection_id: str, tags_to_remove: list[str]) -> dict:
+        """Xóa nhiều tag khỏi collection."""
+        ref = self._collection.document(collection_id)
+        snapshot = await ref.get()
+        if not snapshot.exists:
+            return {}
+        
+        current_data = snapshot.to_dict() or {}
+        current_tags = current_data.get("tags", [])
+        
+        # Loại bỏ tags
+        remaining_tags = [t for t in current_tags if t not in tags_to_remove]
+        
+        update_payload = {
+            "tags": remaining_tags,
+            "updated_at": datetime.now(timezone.utc)
+        }
+        
+        await ref.update(update_payload)
+        updated_snapshot = await ref.get()
+        collection_data = updated_snapshot.to_dict() or {}
+        collection_data["id"] = ref.id
+        return collection_data
+
 
 collection_repo = CollectionRepository()
