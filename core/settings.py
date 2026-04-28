@@ -4,6 +4,7 @@ class Settings(BaseSettings):
     FIREBASE_CREDENTIAL: str
     SERP_API_KEY: str
     GEMINI_API_KEY: str
+    GROQ_API_KEY: str = ""
     VIETMAP_API_KEY: str
     GEOHASH_PRECISION: int = 5
     

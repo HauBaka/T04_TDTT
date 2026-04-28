@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-import socket
 from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
 from time import perf_counter
@@ -11,13 +10,12 @@ from typing import Any
 
 from loguru import logger
 
-from externals.OllamaSummary import ollama_client
+from externals.GroqLLM import groq_client
 from schemas.chatbot_schema import (
     ChatAskRequest,
     ChatAskResponse,
     ChatCitation,
     ChatContextRequest,
-    ChatExecutionMode,
     ChatIntent,
     ChatRecommendationItem,
 )
@@ -27,7 +25,6 @@ from externals.VietMapAPI import vietmap_api
 from repositories.hotel_repo import hotel_repo
 from services.hotel_ranking_service import hotel_ranking_service
 from services.semantic_encoder import semantic_text_encoder
-from services.weather_service import weather_service
 from schemas.trip_context_schema import TravelStyle
 from services.conversation_service import conversation_service
 from schemas.conversation_schema import SendMessageRequest
@@ -50,17 +47,15 @@ class RouteDecision:
     clarification_question: str | None = None
 
 class ChatbotService:
-    # Cấu hình mặc định cân bằng giữa tốc độ và chất lượng.
-    DEFAULT_EXECUTION_MODE = ChatExecutionMode.BALANCED
     CONTEXT_ENRICH_MIN_CONFIDENCE = 0.55
     CONTEXT_ENRICH_LLM_MIN_CONFIDENCE = 0.35
-    GEO_CACHE_TTL_SECONDS = 900
-    GEO_CACHE_MAX_ITEMS = 300
-    MAX_GLOBAL_POOL_FAST = 120
-    MAX_GLOBAL_POOL_NORMAL = 220
-    GLOBAL_POOL_CACHE_TTL_SECONDS = 120
-    NEARBY_POOL_CACHE_TTL_SECONDS = 90
-    NEARBY_POOL_CACHE_MAX_ITEMS = 300
+    GEO_CACHE_TTL_SECONDS = 1800 
+    GEO_CACHE_MAX_ITEMS = 500  
+    MAX_GLOBAL_POOL = 180 
+    GLOBAL_POOL_CACHE_TTL_SECONDS = 300  
+    NEARBY_POOL_CACHE_TTL_SECONDS = 180  
+    NEARBY_POOL_CACHE_MAX_ITEMS = 500  
+    LLM_ROUTER_TIMEOUT_SECONDS = 3.0 
 
     RECOMMENDATION_KEYWORDS = {
         "goi y",
@@ -128,11 +123,6 @@ class ChatbotService:
         "nghỉ dưỡng",
         "dat phong",
         "đặt phòng",
-        "dia diem",
-        "địa điểm",
-        "lich trinh",
-        "lịch trình",
-        "tham quan",
         "budget",
         "luu tru",
         "lưu trú",
@@ -140,6 +130,35 @@ class ChatbotService:
         "hostel",
         "villa",
     }
+
+    # Các từ khóa cảnh báo cho weather/transport/itinerary — nếu xuất hiện, không nên chuyển sang RAG lưu trú
+    WEATHER_KEYWORDS = {
+        "thoi tiet",
+        "thời tiết",
+        "mua",
+        "nắng",
+        "trời",
+        "dự báo",
+        "dự báo thời tiết",
+    }
+
+    TRANSPORT_KEYWORDS = {
+        "di chuyen",
+        "di chuyển",
+        "di lai",
+        "vé",
+        "tau",
+        "tàu",
+        "xe",
+        "may bay",
+        "máy bay",
+        "diem den",
+        "điểm đến",
+        "lịch trình",
+        "tham quan",
+    }
+
+    NON_LODGING_TOPIC_KEYWORDS = WEATHER_KEYWORDS.union(TRANSPORT_KEYWORDS)
 
     AMENITY_SYNONYMS: dict[str, tuple[str, ...]] = {
         "ho boi": ("hồ bơi", "ho boi", "swimming pool", "pool", "be boi", "bể bơi"),
@@ -181,9 +200,11 @@ class ChatbotService:
         self._geo_cache: dict[str, tuple[datetime, str | None, Any]] = {}
         self._global_hotels_cache: tuple[datetime, int, list] | None = None
         self._nearby_hotels_cache: dict[str, tuple[datetime, list]] = {}
-        self._ollama_last_health_check: datetime | None = None
-        self._ollama_is_available: bool | None = None
-        self._ollama_health_ttl_seconds = 45
+        self._groq_last_health_check: datetime | None = None
+        self._groq_is_available: bool | None = None
+        self._groq_health_ttl_seconds = 45
+        self._routing_decision_cache: dict[str, tuple[datetime, RouteDecision, list[str]]] = {}  # Cache routing decisions 5min
+        self._routing_cache_ttl_seconds = 300
 
     def detect_intent(self, message: str) -> ChatIntent:
         """Nhận diện ý định của người dùng một cách nhanh chóng bằng cách quét các từ khóa có sẵn."""
@@ -200,81 +221,8 @@ class ChatbotService:
 
         return ChatIntent.CASUAL
 
-    def _resolve_execution_mode(
-        self,
-        requested_mode: ChatExecutionMode,
-        message: str,
-        context: ChatContextRequest,
-        history: list[str],
-        requester_uid: str | None,
-    ) -> ChatExecutionMode:
-        """Chuyển đổi tham số mode từ request thành chế độ thực thi thực tế (FAST, BALANCED, QUALITY), ưu tiên chế độ cân bằng (BALANCED) làm mặc định."""
-        if requested_mode != ChatExecutionMode.AUTO:
-            return requested_mode
-
-        if self._is_simple_message(message):
-            return ChatExecutionMode.FAST
-
-        if context.address or context.ref_id or context.gps or requester_uid or history:
-            return ChatExecutionMode.BALANCED
-
-        return self.DEFAULT_EXECUTION_MODE
-
-    def _should_use_llm_router(self, execution_mode: ChatExecutionMode) -> bool:
-        """Chỉ sử dụng LLM để định tuyến ý định khi người dùng chọn chế độ chất lượng cao (QUALITY)."""
-        return execution_mode == ChatExecutionMode.QUALITY
-
-    def _should_expand_queries(self, execution_mode: ChatExecutionMode, message: str, context: ChatContextRequest) -> bool:
-        """Xác định xem có nên mở rộng câu hỏi để tăng độ chính xác tìm kiếm hay không. Bỏ qua bước này ở chế độ FAST để tiết kiệm thời gian."""
-        if execution_mode == ChatExecutionMode.QUALITY:
-            return True
-        if execution_mode == ChatExecutionMode.FAST:
-            return False
-        if not self._can_use_ollama():
-            return False
-        if context.min_rating is not None or context.required_amenities:
-            return False
-        return len(self._normalize_space(message)) >= 100 and self._is_complex_lodging_query(message, context)
-
-    def _should_use_general_llm(self, execution_mode: ChatExecutionMode, message: str) -> bool:
-        """Sử dụng LLM để trả lời các câu hỏi tổng quát khi tin nhắn đủ dài và chế độ là QUALITY."""
-        if execution_mode == ChatExecutionMode.QUALITY:
-            return True
-        if execution_mode == ChatExecutionMode.FAST:
-            return False
-        return not self._is_simple_message(message)
-
-    def _should_use_full_rerank(
-        self,
-        execution_mode: ChatExecutionMode,
-        requester_uid: str | None,
-        retrieved_count: int,
-        context: ChatContextRequest,
-    ) -> bool:
-        """Quyết định xem có cần chạy xếp hạng đầy đủ hay không, dựa trên số lượng kết quả tìm thấy và yêu cầu tốc độ."""
-        if execution_mode == ChatExecutionMode.QUALITY:
-            return True
-        if execution_mode == ChatExecutionMode.FAST:
-            return bool(requester_uid)
-        if requester_uid:
-            return True
-        if context.address or context.ref_id or context.gps:
-            return retrieved_count <= 12
-        return retrieved_count <= 8
-
-    def _is_simple_message(self, message: str) -> bool:
-        """Nhận diện các tin nhắn ngắn gọn, mang tính chất chào hỏi, xã giao hoặc xác nhận đơn giản để trả lời nhanh."""
-        normalized = self._normalize_space(message).lower()
-        if any(keyword in normalized for keyword in self.LODGING_KEYWORDS):
-            return False
-        if re.search(r"\b\d+(?:[.,]\d+)?\s*(?:sao|star|tr|triệu|trieu|k|vnd|đ)\b", normalized, flags=re.IGNORECASE):
-            return False
-        if len(normalized) <= 18:
-            return True
-        return any(keyword in normalized for keyword in self.CASUAL_KEYWORDS)
-
-    def _is_complex_lodging_query(self, message: str, context: ChatContextRequest) -> bool:
-        """Đánh giá xem câu hỏi có chứa các yếu tố phức tạp đòi hỏi phải mở rộng từ khóa tìm kiếm để ra kết quả tốt nhất hay không."""
+    def _should_expand_search(self, message: str, context: ChatContextRequest | None = None) -> bool:
+        """Đánh giá xem câu hỏi có chứa các yếu tố phức tạp đòi hỏi phải mở rộng từ khóa tìm kiếm hay không."""
         normalized = self._normalize_space(message).lower()
         complexity_keywords = (
             "so sánh",
@@ -295,7 +243,7 @@ class ChatbotService:
         )
         if len(normalized) > 60:
             return True
-        if context.address or context.ref_id or context.gps:
+        if context and (context.address or context.ref_id or context.gps):
             return True
         return any(keyword in normalized for keyword in complexity_keywords)
 
@@ -323,6 +271,7 @@ class ChatbotService:
 
         # Lấy lịch sử từ ConversationService nếu có đăng nhập
         chatbot_conv_id = None
+        total_start = perf_counter()
         if requester_uid:
             try:
                 from services.conversation_service import conversation_service
@@ -343,7 +292,6 @@ class ChatbotService:
                 logger.warning(f"Failed to fetch chatbot conversation history: {e}")
 
         # Đo thời gian từng bước
-        total_start = perf_counter()
 
         stage_start = perf_counter()
         user_message = self._normalize_space(ask_request.message)
@@ -356,25 +304,16 @@ class ChatbotService:
         context, context_confidence = await self._hydrate_context_from_text(
             context=context,
             message=user_message,
-            requested_mode=ask_request.mode,
             history=ask_request.history,
+            allow_llm_enrich=True,
         )
         timings["hydrate_text"] = perf_counter() - stage_start
 
+        # Luôn dùng LLM router và expand queries để tối ưu chất lượng
         stage_start = perf_counter()
-        execution_mode = self._resolve_execution_mode(ask_request.mode, user_message, context, ask_request.history, requester_uid)
-        timings["resolve_mode"] = perf_counter() - stage_start
-
-        # Xác định xem có cần dùng LLM để định tuyến ý định và mở rộng câu hỏi hay không
-        llm_router_needed = self._should_use_llm_router(execution_mode)
-        expand_needed = self._should_expand_queries(execution_mode, user_message, context)
-        
-        stage_start = perf_counter()
-        llm_task = None
-        if llm_router_needed or expand_needed:
-            llm_task = asyncio.create_task(
-                self._analyze_intent_and_expand(user_message, context, ask_request.history, llm_router_needed, expand_needed)
-            )
+        llm_task = asyncio.create_task(
+            self._analyze_intent_and_expand(user_message, context, ask_request.history, router_needed=True, expand_needed=True)
+        )
 
         # Lấy thông tin địa lý
         geo_stage_start = perf_counter()
@@ -383,38 +322,36 @@ class ChatbotService:
 
         # Lấy danh sách khách sạn
         pool_stage_start = perf_counter()
-        pool_task = asyncio.create_task(self._build_hotel_pool(context, execution_mode))
+        pool_task = asyncio.create_task(self._build_hotel_pool(context))
 
         # Lấy quyết định định tuyến và mở rộng câu hỏi
-        if llm_task:
-            try:
-                # Ép Timeout 3.5s cho LLM Router để bảo vệ SLA 7s tổng thể
-                decision, query_variants = await asyncio.wait_for(llm_task, timeout=3.5)
-            except asyncio.TimeoutError:
-                logger.warning("LLM Router timed out after 3.5s. Fallback to heuristic router.")
-                decision = None
-                query_variants = [user_message]
-
-            if not llm_router_needed or not decision:
-                decision = self._heuristic_route_decision(user_message, context)
-            if not expand_needed:
-                query_variants = [user_message]
-        else:
+        try:
+            # Ép timeout cứng cho LLM Router để giữ tổng request dưới 10s
+            decision, query_variants = await asyncio.wait_for(llm_task, timeout=self.LLM_ROUTER_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            logger.warning(f"LLM Router timed out after {self.LLM_ROUTER_TIMEOUT_SECONDS}s. Fallback to heuristic router.")
             decision = self._heuristic_route_decision(user_message, context)
             query_variants = [user_message]
+        except Exception as e:
+            logger.warning(f"LLM router error: {e}. Fallback to heuristic.")
+            decision = self._heuristic_route_decision(user_message, context)
+            query_variants = [user_message]
+
         timings["route_and_expand"] = perf_counter() - stage_start
 
         # Nếu không sử dụng RAG, trả lời bằng LLM
         if not decision.use_lodging_rag:
             pool_task.cancel()
             stage_start = perf_counter()
-            if not self._should_use_general_llm(execution_mode, user_message):
-                general_answer, used_fallback = self._build_fast_general_answer(user_message), False
-            else:
-                general_answer, used_fallback = await self._build_general_answer(user_message, ask_request.history)
+            general_answer, used_fallback = await self._build_general_answer(user_message, ask_request.history)
+            general_answer = self._embed_clarification_in_answer(
+                general_answer,
+                getattr(decision, "clarification_question", None),
+                decision.requires_more_info,
+            )
             timings["general_answer"] = perf_counter() - stage_start
             timings["total"] = perf_counter() - total_start
-            self._log_stage_timings(execution_mode, timings)
+            self._log_stage_timings(timings)
             self._save_chat_logs(requester_uid, chatbot_conv_id, user_message, general_answer)
             return ResponseSchema(
                 data=ChatAskResponse(
@@ -425,7 +362,7 @@ class ChatbotService:
                     citations=[],
                     missing_fields=decision.missing_fields,
                     requires_more_info=decision.requires_more_info,
-                    used_fallback=used_fallback,
+                    clarification_question=getattr(decision, "clarification_question", None),
                 )
             )
 
@@ -435,18 +372,23 @@ class ChatbotService:
         if intent == ChatIntent.CASUAL:
             pool_task.cancel()
             timings["total"] = perf_counter() - total_start
-            self._log_stage_timings(execution_mode, timings)
-            self._save_chat_logs(requester_uid, chatbot_conv_id, user_message, self._build_casual_reply(user_message))
+            self._log_stage_timings(timings)
+            casual_answer = self._embed_clarification_in_answer(
+                self._build_casual_reply(user_message),
+                decision.clarification_question,
+                False,
+            )
+            self._save_chat_logs(requester_uid, chatbot_conv_id, user_message, casual_answer)
             return ResponseSchema(
                 data=ChatAskResponse(
                     intent=intent,
                     message=user_message,
-                    answer=self._build_casual_reply(user_message),
+                    answer=casual_answer,
                     recommendations=[],
                     citations=[],
                     missing_fields=decision.missing_fields,
                     requires_more_info=False,
-                    used_fallback=False,
+                    clarification_question=decision.clarification_question,
                 )
             )
 
@@ -476,7 +418,6 @@ class ChatbotService:
             context=context,
             hotels=pool_hotels,
             limit=max(20, context.max_ranked_hotels * 6),
-            execution_mode=execution_mode,
         )
         timings["retrieve"] = perf_counter() - stage_start
 
@@ -490,7 +431,6 @@ class ChatbotService:
                 context=relaxed_context,
                 hotels=pool_hotels,
                 limit=max(20, context.max_ranked_hotels * 6),
-                execution_mode=execution_mode,
             )
             timings["retrieve_relaxed"] = perf_counter() - stage_start
             if retrieved:
@@ -499,7 +439,7 @@ class ChatbotService:
 
         # Xếp hạng khách sạn
         stage_start = perf_counter()
-        ranked_hotels = await self._rerank_with_internal_ranker(context, requester_uid, retrieved, execution_mode)
+        ranked_hotels = await self._rerank_with_internal_ranker(context, requester_uid, retrieved)
         timings["rerank"] = perf_counter() - stage_start
 
         selected_hotels = ranked_hotels[: context.max_ranked_hotels]
@@ -515,6 +455,7 @@ class ChatbotService:
             history=ask_request.history,
             requires_more_info=requires_more_info,
         )
+        answer = self._embed_clarification_in_answer(answer, decision.clarification_question, requires_more_info)
         timings["answer"] = perf_counter() - stage_start
 
         response = ChatAskResponse(
@@ -523,12 +464,12 @@ class ChatbotService:
             answer=answer,
             recommendations=recommendations,
             citations=citations,
-            used_fallback=used_fallback,
             requires_more_info=requires_more_info,
             missing_fields=missing_fields,
+            clarification_question=getattr(decision, "clarification_question", None),
         )
         timings["total"] = perf_counter() - total_start
-        self._log_stage_timings(execution_mode, timings)
+        self._log_stage_timings(timings)
         self._save_chat_logs(requester_uid, chatbot_conv_id, user_message, answer)
         return ResponseSchema(data=response)
 
@@ -536,13 +477,22 @@ class ChatbotService:
         self,
         context: ChatContextRequest,
         message: str,
-        requested_mode: ChatExecutionMode,
         history: list[str],
-        allow_llm_enrich: bool = True,
+        allow_llm_enrich: bool = False,
     ) -> tuple[ChatContextRequest, float]:
         """Bóc tách ngữ cảnh (địa điểm, giá cả, số người, tiện ích) từ tin nhắn bằng Regex. Nếu độ tự tin quá thấp, sẽ mượn LLM để trích xuất lại."""
         normalized = self._normalize_space(message).lower()
         score = 0.0
+
+        self._inherit_context_from_history(context, history, normalized)
+        if context.address or context.ref_id or context.gps:
+            score += 0.10
+        if context.min_price != 300000 or context.max_price != 3000000:
+            score += 0.06
+        if context.min_rating is not None or context.required_amenities:
+            score += 0.06
+        if context.check_in is not None or context.check_out is not None:
+            score += 0.06
 
         inferred_address = self._extract_destination(message, normalized)
         if inferred_address and not context.address:
@@ -589,8 +539,8 @@ class ChatbotService:
 
         confidence = min(0.95, score)
 
-        if allow_llm_enrich and self._should_enrich_context_with_llm(requested_mode, confidence, normalized, context):
-            llm_context, llm_confidence = await self._extract_context_with_ollama(message, history)
+        if allow_llm_enrich and self._should_enrich_context_with_llm(confidence, normalized, context):
+            llm_context, llm_confidence = await self._extract_context_with_groq(message, history)
             if llm_context is not None:
                 self._merge_inferred_context(context, llm_context)
                 extracted_fields = self._count_context_fields(llm_context)
@@ -598,6 +548,52 @@ class ChatbotService:
                 confidence = min(0.98, blended + min(0.12, extracted_fields * 0.02))
 
         return context, confidence
+
+    def _inherit_context_from_history(self, context: ChatContextRequest, history: list[str], normalized_message: str) -> None:
+        """Kế thừa ngữ cảnh từ hội thoại gần nhất để xử lý các câu hỏi mơ hồ kiểu 'ở đó', 'đó', 'chỗ nào'."""
+        if not history:
+            return
+
+        vague_references = ("đó", "do", "ở đó", "chỗ đó", "khu đó", "nơi đó", "ở đấy", "vậy", "thế")
+        has_vague_reference = any(token in normalized_message for token in vague_references)
+        if not has_vague_reference and not self._should_expand_search(normalized_message, context):
+            return
+
+        recent_items = [self._normalize_space(item) for item in history if item and self._normalize_space(item)]
+        for item in reversed(recent_items[-8:]):
+            lower_item = item.lower()
+            if not context.address:
+                candidate_address = self._extract_destination(item, lower_item)
+                if candidate_address:
+                    context.address = candidate_address
+                    break
+
+        if not context.required_amenities:
+            for item in reversed(recent_items[-6:]):
+                lower_item = item.lower()
+                inferred_amenities = self._extract_required_amenities(lower_item)
+                if inferred_amenities:
+                    context.required_amenities = inferred_amenities[:3]
+                    break
+
+        if context.min_rating is None:
+            for item in reversed(recent_items[-6:]):
+                lower_item = item.lower()
+                rating = self._extract_min_rating(lower_item)
+                if rating is not None:
+                    context.min_rating = rating
+                    break
+
+        if context.check_in is None or context.check_out is None:
+            for item in reversed(recent_items[-6:]):
+                lower_item = item.lower()
+                check_in, check_out = self._extract_dates(lower_item)
+                if check_in or check_out:
+                    if context.check_in is None and check_in is not None:
+                        context.check_in = check_in
+                    if context.check_out is None and check_out is not None:
+                        context.check_out = check_out
+                    break
 
     async def _hydrate_geo_context(self, context: ChatContextRequest) -> ChatContextRequest:
         """Chuyển đổi địa chỉ thành tọa độ GPS thông qua VietMap API một cách bất đồng bộ và lưu cache để tái sử dụng."""
@@ -680,51 +676,61 @@ class ChatbotService:
             relaxed.required_amenities = relaxed.required_amenities[:1]
         return relaxed
 
-    def _log_stage_timings(self, execution_mode: ChatExecutionMode, timings: dict[str, float]) -> None:
+    def _log_stage_timings(self, timings: dict[str, float]) -> None:
         """Ghi nhận (Log) lại độ trễ của từng bước thực thi để theo dõi, đo lường và phát hiện các điểm nghẽn hiệu năng (Bottlenecks) trong thực tế."""
         metrics = ", ".join(f"{name}={value:.3f}s" for name, value in timings.items())
-        logger.info(f"Chatbot latency | mode={execution_mode.value} | {metrics}")
+        logger.info(f"Chatbot latency | {metrics}")
 
-    def _can_use_ollama(self) -> bool:
-        """Kiểm tra nhanh xem service Ollama ở máy tính nội bộ có đang hoạt động không. Kết quả được cache lại trong vài giây để tránh nghẽn timeout."""
+    def _can_use_groq(self) -> bool:
+        """Kiểm tra nhanh xem Groq LLM có sẵn sàng không. Kết quả được cache lại trong vài giây để tránh nghẽn timeout."""
         now = datetime.now(timezone.utc)
-        if self._ollama_last_health_check is not None and self._ollama_is_available is not None:
-            elapsed = (now - self._ollama_last_health_check).total_seconds()
-            if elapsed <= self._ollama_health_ttl_seconds:
-                return self._ollama_is_available
+        if self._groq_last_health_check is not None and self._groq_is_available is not None:
+            elapsed = (now - self._groq_last_health_check).total_seconds()
+            if elapsed <= self._groq_health_ttl_seconds:
+                return self._groq_is_available
 
         is_available = False
         try:
-            socket.create_connection(("127.0.0.1", 11434), timeout=0.12).close()
-            is_available = True
+            # Kiểm tra xem groq_client đã được khởi tạo
+            is_available = groq_client is not None
         except OSError:
             is_available = False
 
-        self._ollama_is_available = is_available
-        self._ollama_last_health_check = now
+        self._groq_is_available = is_available
+        self._groq_last_health_check = now
         return is_available
 
     def _should_enrich_context_with_llm(
         self,
-        requested_mode: ChatExecutionMode,
         confidence: float,
         normalized_message: str,
         context: ChatContextRequest,
     ) -> bool:
-        """Quyết định xem có cần gọi LLM để hỗ trợ bóc tách ngữ cảnh hay không (chỉ kích hoạt khi Regex thất bại và mode = QUALITY)."""
+        """Chỉ gọi LLM khi câu hỏi còn mơ hồ và thật sự liên quan đến lưu trú."""
         if confidence >= self.CONTEXT_ENRICH_MIN_CONFIDENCE:
             return False
-        if requested_mode == ChatExecutionMode.FAST:
+        if not self._can_use_groq():
             return False
-        if requested_mode == ChatExecutionMode.BALANCED:
+        if confidence >= 0.40:
             return False
-        if requested_mode == ChatExecutionMode.QUALITY:
-            return True
-        return self._is_lodging_related(normalized_message, context) and confidence >= self.CONTEXT_ENRICH_LLM_MIN_CONFIDENCE
 
-    async def _extract_context_with_ollama(self, message: str, history: list[str]) -> tuple[ChatContextRequest | None, float]:
-        """Sử dụng LLM (Ollama) để đọc hiểu tin nhắn và trích xuất ra các trường ngữ cảnh (địa chỉ, giá, số người) có cấu trúc chuẩn JSON."""
-        if not self._can_use_ollama():
+        has_explicit_context = any(
+            [
+                context.address,
+                context.min_rating is not None,
+                context.required_amenities,
+                context.check_in is not None,
+                context.check_out is not None,
+            ]
+        )
+        if has_explicit_context:
+            return False
+
+        return self._is_lodging_related(normalized_message, context) or confidence < self.CONTEXT_ENRICH_LLM_MIN_CONFIDENCE
+
+    async def _extract_context_with_groq(self, message: str, history: list[str]) -> tuple[ChatContextRequest | None, float]:
+        """Sử dụng Groq LLM để đọc hiểu tin nhắn và trích xuất ra các trường ngữ cảnh (địa chỉ, giá, số người) có cấu trúc chuẩn JSON."""
+        if not self._can_use_groq():
             return None, 0.0
 
         prompt = (
@@ -744,7 +750,7 @@ class ChatbotService:
         )
 
         try:
-            raw = await asyncio.to_thread(ollama_client.generate_content, prompt)
+            raw = await asyncio.to_thread(groq_client.generate_content, prompt)
             parsed: dict[str, Any] = json.loads(raw)
         except Exception as exc:
             logger.warning(f"LLM context extraction failed: {str(exc)}")
@@ -1160,8 +1166,19 @@ class ChatbotService:
         self, message: str, context: ChatContextRequest, history: list[str], router_needed: bool, expand_needed: bool
     ) -> tuple[RouteDecision | None, list[str]]:
         """Sử dụng LLM để gộp chung 2 việc: Phân tích định tuyến ý định và Mở rộng/Viết lại câu hỏi chỉ trong 1 lần gọi, giúp giảm độ trễ."""
-        if not self._can_use_ollama():
+        if not self._can_use_groq():
             return None, [message]
+
+        # Check routing cache để bypass Groq call cho repeated queries
+        if router_needed:
+            cache_key = self._normalize_space(message).lower()
+            now = datetime.now(timezone.utc)
+            cached = self._routing_decision_cache.get(cache_key)
+            if cached is not None:
+                cached_at, cached_decision, cached_queries = cached
+                if (now - cached_at).total_seconds() <= self._routing_cache_ttl_seconds:
+                    logger.debug(f"Routing cache HIT for message: {cache_key[:50]}")
+                    return cached_decision, cached_queries
 
         json_keys = []
         if router_needed:
@@ -1183,7 +1200,7 @@ class ChatbotService:
             )
         if expand_needed:
             prompt += (
-                "queries là list tối đa 4 câu viết lại ngắn gọn của người dùng (chỉ cần nếu use_lodging_rag = true). Giữ nguyên ý nghĩa.\\n"
+                "queries là list tối đa 2 câu viết lại ngắn gọn của người dùng (chỉ cần nếu use_lodging_rag = true). Giữ nguyên ý nghĩa.\\n"
             )
             
         prompt += (
@@ -1195,7 +1212,7 @@ class ChatbotService:
         )
 
         try:
-            raw = await asyncio.to_thread(ollama_client.generate_content, prompt)
+            raw = await asyncio.to_thread(groq_client.generate_content, prompt)
             parsed: dict[str, Any] = json.loads(raw)
 
             decision = None
@@ -1215,9 +1232,6 @@ class ChatbotService:
                 clarification_question = parsed.get("clarification_question")
                 clarification_text = str(clarification_question).strip() if clarification_question else None
 
-                if context.address or context.ref_id or context.gps:
-                    use_lodging_rag = True
-
                 decision = RouteDecision(
                     intent=intent,
                     use_lodging_rag=use_lodging_rag,
@@ -1234,12 +1248,81 @@ class ChatbotService:
                         val = self._normalize_space(str(item))
                         if val and val not in queries:
                             queries.append(val)
-                queries = queries[:4]
+                queries = self._augment_query_variants_locally(queries, message, context, history)
 
+            # Cache routing decision
+            if router_needed and decision:
+                cache_key = self._normalize_space(message).lower()
+                self._routing_decision_cache[cache_key] = (datetime.now(timezone.utc), decision, queries)
+                
             return decision, queries
         except Exception as exc:
             logger.warning(f"Combined LLM logic failed: {str(exc)}")
-            return None, [message]
+            return None, self._augment_query_variants_locally([message], message, context, history)
+
+    def _augment_query_variants_locally(self, base_queries: list[str], message: str, context: ChatContextRequest, history: list[str]) -> list[str]:
+        """Mở rộng truy vấn bằng biến thể local để bắt nhiều cách nhập câu hơn mà không cần gọi thêm LLM."""
+        queries: list[str] = []
+        seen: set[str] = set()
+
+        def append_query(value: str) -> None:
+            normalized_value = self._normalize_space(value)
+            if not normalized_value:
+                return
+            lowered = normalized_value.lower()
+            if lowered in seen:
+                return
+            seen.add(lowered)
+            queries.append(normalized_value)
+
+        for query in base_queries:
+            append_query(query)
+
+        append_query(message)
+
+        query_seed_parts = [message]
+        if context.address:
+            query_seed_parts.append(f"khach san o {context.address}")
+            query_seed_parts.append(f"luu tru tai {context.address}")
+        if context.min_price != 300000 or context.max_price != 3000000:
+            query_seed_parts.append(f"ngan sach {context.min_price} den {context.max_price}")
+        if context.min_rating is not None:
+            query_seed_parts.append(f"toi thieu {context.min_rating} sao")
+        if context.required_amenities:
+            query_seed_parts.append(" ".join(context.required_amenities))
+        if context.trip_style != TravelStyle.EXPLORE:
+            query_seed_parts.append(context.trip_style.value)
+
+        recent_hint = self._last_history_address(history)
+        if recent_hint and not context.address:
+            query_seed_parts.append(f"o {recent_hint}")
+
+        for seed in query_seed_parts:
+            tokens = self._normalize_space(seed).lower()
+            if not tokens:
+                continue
+            if tokens == self._normalize_space(message).lower():
+                continue
+            append_query(tokens)
+
+        if len(queries) > 4:
+            queries = queries[:4]
+        return queries
+
+    def _last_history_address(self, history: list[str]) -> str | None:
+        """Lấy địa điểm gần nhất từ lịch sử để phục vụ các câu hỏi tham chiếu như 'đó', 'chỗ đó'."""
+        if not history:
+            return None
+
+        for item in reversed(history[-8:]):
+            normalized_item = self._normalize_space(item)
+            if not normalized_item:
+                continue
+            lower_item = normalized_item.lower()
+            candidate = self._extract_destination(normalized_item, lower_item)
+            if candidate:
+                return candidate
+        return None
 
     def _heuristic_route_decision(self, message: str, context: ChatContextRequest) -> RouteDecision:
         """Phương án dự phòng (Fallback) phân tích ý định bằng từ khóa và vector ngữ nghĩa (Semantic) khi LLM Router bị lỗi."""
@@ -1248,7 +1331,16 @@ class ChatbotService:
         semantic_intent = self._intent_from_semantic(normalized)
         if semantic_intent is not None:
             intent = semantic_intent
-        is_lodging = self._is_lodging_related(normalized, context)
+
+        has_non_lodging_topic = any(keyword in normalized for keyword in self.NON_LODGING_TOPIC_KEYWORDS)
+        has_lodging_signal = self._has_lodging_signal(normalized)
+        
+        if has_lodging_signal:
+            is_lodging = True
+        elif has_non_lodging_topic:
+            is_lodging = False
+        else:
+            is_lodging = self._is_lodging_related(normalized, context, intent, has_non_lodging_topic, has_lodging_signal)
 
         requires_more_info = False
         missing_fields: list[str] = []
@@ -1267,13 +1359,10 @@ class ChatbotService:
             clarification_question=clarification_question,
         )
 
-
-
-    async def _build_hotel_pool(self, context: ChatContextRequest, execution_mode: ChatExecutionMode) -> list:
+    async def _build_hotel_pool(self, context: ChatContextRequest) -> list:
         """Lấy ra danh sách khách sạn tiềm năng (Candidate Pool) từ cơ sở dữ liệu dựa trên khoảng cách địa lý (Nearby) và toàn cầu (Global)."""
-        global_limit = self.MAX_GLOBAL_POOL_FAST if execution_mode == ChatExecutionMode.FAST else self.MAX_GLOBAL_POOL_NORMAL
         nearby_task = asyncio.create_task(self._get_nearby_hotels(context))
-        global_task = asyncio.create_task(self._get_global_hotels_cached(global_limit))
+        global_task = asyncio.create_task(self._get_global_hotels_cached(self.MAX_GLOBAL_POOL))
         nearby_hotels, global_hotels = await asyncio.gather(nearby_task, global_task)
 
         if len(nearby_hotels) >= 25:
@@ -1302,7 +1391,10 @@ class ChatbotService:
 
     async def _get_nearby_hotels(self, context: ChatContextRequest) -> list:
         """Truy vấn danh sách các khách sạn nằm gần vị trí được chỉ định (tọa độ GPS, Ref ID hoặc tên địa chỉ)."""
-        hydrated = await self._hydrate_geo_context(context)
+        if context.gps is None and context.ref_id is None and context.address:
+            hydrated = await self._hydrate_geo_context(context)
+        else:
+            hydrated = context
         gps = hydrated.gps
 
         nearby_key = self._nearby_cache_key(hydrated)
@@ -1347,7 +1439,6 @@ class ChatbotService:
         context: ChatContextRequest,
         hotels: list,
         limit: int,
-        execution_mode: ChatExecutionMode,
     ) -> list[RetrievedHotel]:
         """Truy xuất kết hợp (Hybrid Retrieval): Áp dụng cả so khớp từ khóa (Lexical), so khớp vector ngữ nghĩa (Semantic) và độ khớp ngân sách để chọn ra các KS tốt nhất."""
         if not hotels:
@@ -1379,7 +1470,7 @@ class ChatbotService:
             return []
 
         shortlist_candidates.sort(key=lambda item: item[1], reverse=True)
-        shortlist_size = self._semantic_shortlist_limit(execution_mode, limit)
+        shortlist_size = self._semantic_shortlist_limit(limit)
         shortlisted_indexes = [idx for idx, _ in shortlist_candidates[:shortlist_size]]
 
         query_vectors: list[tuple[float, ...] | None] = [None for _ in merged_queries]
@@ -1441,31 +1532,19 @@ class ChatbotService:
         retrieved.sort(key=lambda item: item.score, reverse=True)
         return retrieved[: max(1, limit)]
 
-    def _semantic_shortlist_limit(self, execution_mode: ChatExecutionMode, limit: int) -> int:
-        """Giới hạn số lượng ứng viên khách sạn tối đa được phép chạy qua bộ mã hóa vector (Semantic Encoding) để giữ cho tốc độ hệ thống không bị chậm đi."""
-        if execution_mode == ChatExecutionMode.FAST:
-            return max(limit, 50)
-        if execution_mode == ChatExecutionMode.QUALITY:
-            return max(limit, 180)
-        return max(limit, 110)
+    def _semantic_shortlist_limit(self, limit: int) -> int:
+        """Giới hạn số lượng ứng viên khách sạn tối đa được phép chạy qua bộ mã hóa vector (Semantic Encoding) - giảm từ 180 xuống 120 để tốc độ."""
+        return min(limit, 120)
 
     async def _rerank_with_internal_ranker(
         self,
         context: ChatContextRequest,
         requester_uid: str | None,
         retrieved: list[RetrievedHotel],
-        execution_mode: ChatExecutionMode,
     ) -> list:
         """Xếp hạng lại (Rerank) các khách sạn đã lọc bằng dịch vụ chấm điểm nội bộ, kết hợp thêm yếu tố thời tiết và hồ sơ cá nhân hóa của người dùng."""
         if not retrieved:
             return []
-
-        if execution_mode == ChatExecutionMode.FAST:
-            return [item.hotel for item in retrieved]
-
-        if not self._should_use_full_rerank(execution_mode, requester_uid, len(retrieved), context):
-            # Với anonymous user ưu tiên tốc độ: giữ nguyên thứ tự retrieval score.
-            return [item.hotel for item in retrieved]
 
         now = datetime.now(timezone.utc)
         check_in = context.check_in or (now + timedelta(days=7))
@@ -1499,19 +1578,8 @@ class ChatbotService:
 
         hotels = [item.hotel for item in retrieved]
 
+        # Skip weather loading để giảm latency (weather không critical cho ranking)
         weather_by_identity: dict[str, list] = {}
-        destination_gps = context.gps or getattr(hotels[0], "gps_coordinates", None)
-        should_load_weather = execution_mode == ChatExecutionMode.QUALITY and destination_gps is not None
-        if should_load_weather:
-            try:
-                weather_by_identity = await weather_service.build_weather_context(
-                    places=hotels,
-                    check_in_date=check_in,
-                    check_out_date=check_out,
-                    destination_gps=destination_gps,
-                )
-            except Exception as exc:
-                logger.warning(f"Weather context unavailable for chatbot ranking: {str(exc)}")
 
         try:
             return await hotel_ranking_service.rank_discovered_hotels(
@@ -1533,7 +1601,7 @@ class ChatbotService:
         history: list[str],
         requires_more_info: bool,
     ) -> tuple[str, bool]:
-        """Sử dụng Ollama để sinh ra đoạn văn bản tư vấn và lý giải vì sao chọn các khách sạn này. Có sẵn cơ chế fallback nếu model sập."""
+        """Sử dụng Groq LLM để sinh ra đoạn văn bản tư vấn và lý giải vì sao chọn các khách sạn này. Có sẵn cơ chế fallback nếu model sập."""
         if not recommendations:
             if requires_more_info:
                 return (
@@ -1554,7 +1622,7 @@ class ChatbotService:
 
         history_text = self._history_text(history)
 
-        if not self._can_use_ollama():
+        if not self._can_use_groq():
             fallback_lines = ["Mình gợi ý nhanh top lựa chọn phù hợp nhất hiện tại:"]
             for idx, item in enumerate(recommendations[:3], start=1):
                 fallback_lines.append(
@@ -1590,14 +1658,14 @@ class ChatbotService:
         )
 
         try:
-            generated = await asyncio.to_thread(ollama_client.generate_content, prompt)
+            generated = await asyncio.to_thread(groq_client.generate_content, prompt)
             if generated and generated.strip():
                 parsed = json.loads(generated)
                 answer = str(parsed.get("answer", "")).strip()
                 if answer:
                     return answer, False
         except Exception as exc:
-            logger.warning(f"Chatbot Ollama generation failed: {str(exc)}")
+            logger.warning(f"Chatbot Groq generation failed: {str(exc)}")
 
         fallback_lines = ["Mình gợi ý nhanh top lựa chọn phù hợp nhất hiện tại:"]
         for idx, item in enumerate(recommendations[:3], start=1):
@@ -1611,8 +1679,8 @@ class ChatbotService:
         return "\n".join(fallback_lines), True
 
     async def _build_general_answer(self, message: str, history: list[str]) -> tuple[str, bool]:
-        """Dùng LLM sinh ra câu trả lời cho những câu hỏi tổng quát, tư vấn thông thường không đòi hỏi luồng trích xuất dữ liệu khách sạn (Lodging RAG)."""
-        if not self._can_use_ollama():
+        """Dùng Groq LLM sinh ra câu trả lời cho những câu hỏi tổng quát, tư vấn thông thường không đòi hỏi luồng trích xuất dữ liệu khách sạn (Lodging RAG)."""
+        if not self._can_use_groq():
             return self._build_fast_general_answer(message), True
 
         prompt = (
@@ -1629,7 +1697,7 @@ class ChatbotService:
         )
 
         try:
-            generated = await asyncio.to_thread(ollama_client.generate_content, prompt)
+            generated = await asyncio.to_thread(groq_client.generate_content, prompt)
             if generated and generated.strip():
                 parsed = json.loads(generated)
                 answer = str(parsed.get("answer", "")).strip()
@@ -1802,7 +1870,9 @@ class ChatbotService:
 
         if context.required_amenities:
             hotel_amenities = self._hotel_amenities_canonical(hotel)
-            if any(amenity not in hotel_amenities for amenity in context.required_amenities):
+            # Normalize incoming required amenities before checking against hotel's canonical set
+            required_norm = [self._normalize_amenity(str(item)) for item in context.required_amenities if str(item).strip()]
+            if any(amenity not in hotel_amenities for amenity in required_norm):
                 return False
 
         return True
@@ -1832,17 +1902,45 @@ class ChatbotService:
         normalized = [self._normalize_amenity(str(item)) for item in values if str(item).strip()]
         return {item for item in normalized if item}
 
-    def _is_lodging_related(self, normalized_message: str, context: ChatContextRequest) -> bool:
+    def _has_lodging_signal(self, normalized_message: str) -> bool:
+        """Nhận diện tín hiệu lưu trú rõ ràng để tránh đẩy nhầm câu hỏi đa ý vào RAG khách sạn."""
+        if any(keyword in normalized_message for keyword in self.LODGING_KEYWORDS):
+            return True
+        if any(word in normalized_message for word in self.RECOMMENDATION_KEYWORDS):
+            return True
+        if any(word in normalized_message for word in self.COMPARE_KEYWORDS):
+            return True
+        return False
+
+    def _is_lodging_related(
+        self,
+        normalized_message: str,
+        context: ChatContextRequest,
+        intent: ChatIntent | None = None,
+        has_non_lodging_topic: bool = False,
+        has_lodging_signal: bool = False,
+    ) -> bool:
         """Xác định nhanh xem câu hỏi hiện tại có liên quan đến việc đặt phòng, lưu trú, khách sạn hay không dựa trên từ vựng."""
+        # Câu hỏi có chủ đề rõ ràng ngoài lưu trú thì ưu tiên trả lời tổng quát, không đẩy vào RAG khách sạn.
+        if has_non_lodging_topic and not has_lodging_signal:
+            return False
+
+        if has_lodging_signal:
+            return True
+
+        semantic_lodging_intent = self._intent_from_semantic(normalized_message)
+        if semantic_lodging_intent in {ChatIntent.RECOMMENDATION, ChatIntent.COMPARISON}:
+            return True
+
+        # Với intent INFORMATION chỉ vào RAG khi có thêm ngữ cảnh địa điểm rõ ràng.
+        if semantic_lodging_intent == ChatIntent.INFORMATION:
+            return bool(context.address or context.ref_id or context.gps)
+
+        # Có địa điểm nhưng không có tín hiệu lưu trú rõ ràng thì giữ ở luồng general để tránh nhầm sang khách sạn.
         if context.address or context.ref_id or context.gps:
-            return True
-        if self._intent_from_semantic(normalized_message) in {
-            ChatIntent.RECOMMENDATION,
-            ChatIntent.COMPARISON,
-            ChatIntent.INFORMATION,
-        }:
-            return True
-        return any(keyword in normalized_message for keyword in self.LODGING_KEYWORDS)
+            return False
+
+        return False
 
     def _intent_from_semantic(self, message: str) -> ChatIntent | None:
         """Suy luận ý định (Intent) của câu hỏi bằng cách đo khoảng cách Cosine Vector so với các câu mẫu (Prototypes) đã được nạp sẵn."""
@@ -1900,7 +1998,7 @@ class ChatbotService:
 
     def _normalize_space(self, text: str) -> str:
         """Làm sạch văn bản bằng cách chuẩn hóa, loại bỏ các khoảng trắng dư thừa giúp thao tác chuỗi ổn định và không bị lỗi."""
-        return re.sub(r"\\s+", " ", text).strip()
+        return re.sub(r"\s+", " ", text).strip()
 
     def _history_text(self, history: list[str]) -> str:
         """Lấy ra một số lượng tin nhắn trong quá khứ gần nhất (Lịch sử chat) để nhúng vào Prompt làm ngữ cảnh giao tiếp cho LLM."""
@@ -1923,6 +2021,22 @@ class ChatbotService:
         return (
             "Mình luôn sẵn sàng hỗ trợ bạn. Nếu bạn muốn tìm nơi lưu trú, chỉ cần cho mình điểm đến và ưu tiên của bạn."
         )
+
+    def _embed_clarification_in_answer(self, answer: str, clarification_question: str | None, requires_more_info: bool) -> str:
+        """Gộp câu hỏi làm rõ vào nội dung trả lời để FE chỉ cần render `answer`."""
+        if not requires_more_info:
+            return answer
+
+        question = self._normalize_space(clarification_question or "")
+        if not question:
+            return answer
+
+        normalized_answer = self._normalize_space(answer)
+        if question in normalized_answer:
+            return answer
+
+        separator = "\n\n" if "\n" not in answer else "\n"
+        return f"{answer}{separator}{question}"
 
 
 chatbot_service = ChatbotService()
