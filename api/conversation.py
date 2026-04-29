@@ -5,7 +5,7 @@ from services.conversation_service import conversation_service
 from core.dependencies import get_current_user
 
 conversation_router = APIRouter()
-
+# --- QUẢN LÝ HỘI THOẠI (CONVERSATIONS) ---
 @conversation_router.post("/conversations", response_model=ResponseSchema[ConversationResponse])
 async def create_conversation(conversation_request: ConversationCreateRequest, requester=Depends(get_current_user(optional=False))):
     """Tạo một conversation mới cho người dùng đã xác thực."""
@@ -26,6 +26,7 @@ async def delete_conversation(conversation_id: str, requester=Depends(get_curren
     """Xóa một conversation."""
     return await conversation_service.delete_conversation(conversation_id, requester.get("uid"))
 
+# --- QUẢN LÝ THÀNH VIÊN (MEMBERS) ---
 @conversation_router.post("/conversations/{conversation_id}/members", response_model=ResponseSchema[ConversationResponse])
 async def add_members_to_conversation(conversation_id: str, member: AddMembersRequest, requester=Depends(get_current_user(optional=False))):
     """Thêm nhiều thành viên vào một conversation."""
@@ -36,6 +37,7 @@ async def remove_members_from_conversation(conversation_id: str, target_uid: str
     """Xóa nhiều thành viên khỏi một conversation."""
     return await conversation_service.remove_members_from_conversation(conversation_id, requester.get("uid"), [target_uid])
 
+# --- QUẢN LÝ TIN NHẮN (MESSAGES) & UNREAD STATUS ---
 @conversation_router.post("/conversations/{conversation_id}/messages", response_model=ResponseSchema[ConversationResponse])
 async def send_message_to_conversation(conversation_id: str, message_request: SendMessageRequest, requester=Depends(get_current_user(optional=False))):
     """Gửi một tin nhắn mới vào một conversation."""
@@ -45,3 +47,9 @@ async def send_message_to_conversation(conversation_id: str, message_request: Se
 async def delete_message_from_conversation(conversation_id: str, message_id: str, requester=Depends(get_current_user(optional=False))):
     """Xóa một tin nhắn cụ thể khỏi một conversation."""
     return await conversation_service.delete_message_from_conversation(conversation_id, message_id, requester.get("uid"))
+
+# Hàm này thêm dô để lỡ bên FE muốn dùng để đánh dấu đã đọc để reset unread nhó sếp :<
+@conversation_router.patch("/conversations/{conversation_id}/read", response_model=ResponseSchema[bool])
+async def mark_as_read(conversation_id: str, requester=Depends(get_current_user(optional=False))):
+    """Endpoint để FE chủ động báo rằng user đã đọc tin nhắn."""
+    return await conversation_service.mark_conversation_as_read(conversation_id, requester.get("uid"))

@@ -11,9 +11,7 @@ class ConversationMember(BaseModel):
     role: ConversationRole = ConversationRole.MEMBER
     joined_at: datetime
     # TODO: update các field dưới đây, mỗi khi GET conversation để đảm bảo thông tin của member luôn được cập nhật
-    display_name: str | None = None
-    username: str | None = None
-    avatar_url: str | None = None
+
 
 class AttachmentType(str, Enum):
     IMAGE = "image"

@@ -2,7 +2,7 @@
 from datetime import datetime
 from fastapi import HTTPException
 
-from repositories import conversation_repo
+from repositories.conversation_repo import conversation_repo
 from schemas.conversation_schema import ConversationResponse, ConversationCreateRequest, ConversationUpdateRequest, AddMembersRequest, SendMessageRequest
 from schemas.response_schema import ResponseSchema
 
@@ -125,13 +125,16 @@ class ConversationService:
                 thumbnail_url=conv.get("thumbnail_url"), 
                 created_at=conv["created_at"], 
                 updated_at=datetime.now(), 
-                members=[])
+                members=conv.get("member_uids", []))
             )
     
     async def remove_members_from_conversation(self, conversation_id: str, requester_uid: str, target_uids: list[str]) -> ResponseSchema[ConversationResponse]:
         """Xóa nhiều thành viên khỏi một conversation."""
         conv = await self.conversation_repository.get_by_id(conversation_id)
-        if not conv or conv.get("owner_uid") != requester_uid:
+        if not conv:
+            raise HTTPException(status_code=404, detail="Hội thoại không tồn tại")
+
+        if conv.get("owner_uid") != requester_uid:
             raise HTTPException(status_code=403, detail="Chỉ quản trị viên mới có quyền xóa thành viên")
 
         # Xóa khỏi conversation
@@ -148,7 +151,7 @@ class ConversationService:
                 thumbnail_url=conv.get("thumbnail_url"), 
                 created_at=conv["created_at"], 
                 updated_at=datetime.now(), 
-                members=[])
+                members=conv.get("member_uids", []))
             )
     
     async def send_message_to_conversation(self, conversation_id: str, requester_uid: str, message_data: SendMessageRequest) -> ResponseSchema[ConversationResponse]:
@@ -157,7 +160,10 @@ class ConversationService:
         conv = await self.conversation_repository.get_by_id(conversation_id)
         member_uids = conv.get("member_uids", [])
         
-        if not conv or requester_uid not in member_uids:
+        if not conv:
+            raise HTTPException(status_code=404, detail="Hội thoại không tồn tại")
+
+        if requester_uid not in member_uids:
             raise HTTPException(status_code=403, detail="Bạn không phải thành viên nhóm này")
 
         # Chuyển Schema thành dict và thêm thông tin người gửi
@@ -194,14 +200,20 @@ class ConversationService:
                 thumbnail_url=conv.get("thumbnail_url"), 
                 created_at=conv["created_at"], 
                 updated_at=datetime.now(), 
-                members=[])
+                members=conv.get("member_uids", []))
             )
 
     async def delete_message_from_conversation(self, conversation_id: str, message_id: str, requester_uid: str) -> ResponseSchema[ConversationResponse]:
         """Xóa một tin nhắn khỏi một conversation."""
         conv = await self.conversation_repository.get_by_id(conversation_id)
-        if not conv or conv.get("owner_uid") != requester_uid:
-            raise HTTPException(status_code=403, detail="Chỉ quản trị viên mới có quyền xóa đoạn chat")
+        member_uids = conv.get("member_uids", [])
+        msg = await self.conversation_repository.get_message_by_id(conversation_id, message_id)
+        if not conv:
+            raise HTTPException(status_code=404, detail="Hội thoại không tồn tại")
+        
+        # Cho phép người gửi xóa tin của chính họ hoặc quản trị viên xóa
+        if msg.get("sender_uid") != requester_uid and conv.get("owner_uid") != requester_uid:
+            raise HTTPException(status_code=403, detail="Bạn không có quyền xóa tin nhắn này")
         await self.conversation_repository.delete_message(conversation_id, message_id)
         return ResponseSchema(data=ConversationResponse(
                 id=conversation_id, 
@@ -211,19 +223,19 @@ class ConversationService:
                 thumbnail_url=conv.get("thumbnail_url"), 
                 created_at=conv["created_at"], 
                 updated_at=datetime.now(), 
-                members=[])
+                members=conv.get("member_uids", []))
             )
     
     async def get_or_create_default_chatbot_conversation(self, uid: str) -> ResponseSchema[ConversationResponse]:
         """Lấy conversation mặc định cho chatbot của user, nếu chưa có thì tạo mới."""
         # Định nghĩa ID cố định cho cuộc hội thoại chatbot của User này
-        chatbot_conv_id = f"chatbot_{uid}"
+        chatbot_conv_id = f"chatbot_conv_{uid}"
         
         # Thử lấy hội thoại từ Database
         conv = await self.conversation_repository.get_by_id(chatbot_conv_id)
         if not conv:
             new_data = {
-                "id": chatbot_conv_id,
+                "id": f"chatbot_conv_{uid}",
                 "owner_uid": uid,
                 "name": "Chatbot Assistant",
                 "description": "Default chatbot conversation",
@@ -253,6 +265,10 @@ class ConversationService:
         messages = await self.conversation_repository.get_recent_messages(conversation_id, limit)
         return ResponseSchema(data=messages)
 
+    async def mark_conversation_as_read(self, conversation_id: str, requester_uid: str) -> ResponseSchema[bool]:
+        """Dùng để FE gọi khi user click vào chat."""
+        await self.conversation_repository.reset_user_unread_count(requester_uid, conversation_id)
+        return ResponseSchema(data=True)
     
 
 
