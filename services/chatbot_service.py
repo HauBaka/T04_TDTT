@@ -19,7 +19,7 @@ from schemas.chatbot_schema import (
     ChatIntent,
     ChatRecommendationItem,
 )
-from schemas.discover_schema import DiscoverRequest
+from schemas.discover_schema import DiscoverRequest, DiscoverHotel
 from schemas.response_schema import ResponseSchema
 from externals.VietMapAPI import vietmap_api
 from repositories.hotel_repo import hotel_repo
@@ -32,7 +32,7 @@ from schemas.conversation_schema import SendMessageRequest
 
 @dataclass
 class RetrievedHotel:
-    hotel: object
+    hotel: DiscoverHotel
     score: float
     snippet: str
     matched_query: str
@@ -327,7 +327,8 @@ class ChatbotService:
         # Lấy quyết định định tuyến và mở rộng câu hỏi
         try:
             # Ép timeout cứng cho LLM Router để giữ tổng request dưới 10s
-            decision, query_variants = await asyncio.wait_for(llm_task, timeout=self.LLM_ROUTER_TIMEOUT_SECONDS)
+            decision_result, query_variants = await asyncio.wait_for(llm_task, timeout=self.LLM_ROUTER_TIMEOUT_SECONDS)
+            decision = decision_result if decision_result is not None else self._heuristic_route_decision(user_message, context)
         except asyncio.TimeoutError:
             logger.warning(f"LLM Router timed out after {self.LLM_ROUTER_TIMEOUT_SECONDS}s. Fallback to heuristic router.")
             decision = self._heuristic_route_decision(user_message, context)
@@ -346,7 +347,7 @@ class ChatbotService:
             general_answer, used_fallback = await self._build_general_answer(user_message, ask_request.history)
             general_answer = self._embed_clarification_in_answer(
                 general_answer,
-                getattr(decision, "clarification_question", None),
+                decision.clarification_question,
                 decision.requires_more_info,
             )
             timings["general_answer"] = perf_counter() - stage_start
@@ -362,7 +363,7 @@ class ChatbotService:
                     citations=[],
                     missing_fields=decision.missing_fields,
                     requires_more_info=decision.requires_more_info,
-                    clarification_question=getattr(decision, "clarification_question", None),
+                    clarification_question=decision.clarification_question,
                 )
             )
 
@@ -466,7 +467,7 @@ class ChatbotService:
             citations=citations,
             requires_more_info=requires_more_info,
             missing_fields=missing_fields,
-            clarification_question=getattr(decision, "clarification_question", None),
+            clarification_question=decision.clarification_question,
         )
         timings["total"] = perf_counter() - total_start
         self._log_stage_timings(timings)
@@ -1894,6 +1895,8 @@ class ChatbotService:
             return max(0.0, min(5.0, weighted))
 
         fallback = ai_value if ai_value is not None else raw_value
+        if fallback is None:
+            return None
         return max(0.0, min(5.0, float(fallback)))
 
     def _hotel_amenities_canonical(self, hotel) -> set[str]:
