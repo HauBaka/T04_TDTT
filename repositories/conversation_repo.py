@@ -15,19 +15,19 @@ class ConversationRepository(BaseRepository):
         await doc_ref.set(conversation_data)
         return conversation_data
     
-    async def get_by_id(self, conversation_id: str) -> dict:
+    async def get_by_id(self, conversation_id: str) -> dict | None:
         """Lấy thông tin một conversation theo ID."""
         doc = await self._collection.document(conversation_id).get()
         return doc.to_dict() if doc.exists else {}
     
-    async def update(self, conversation_id: str, update_data: dict) -> dict:
+    async def update(self, conversation_id: str, update_data: dict) -> dict | None:
         """Cập nhật thông tin một conversation."""
         doc_ref = self._collection.document(conversation_id)
         await doc_ref.update(update_data)
         res = await doc_ref.get()
         return res.to_dict()
     
-    async def add_members(self, conversation_id: str, member_uids: list[str]) -> dict:
+    async def add_members(self, conversation_id: str, member_uids: list[str]) -> dict | None:
         """Thêm thành viên vào một conversation."""
         doc_ref = self._collection.document(conversation_id)
         batch = self._get_db().batch()
@@ -42,8 +42,6 @@ class ConversationRepository(BaseRepository):
 
             member_detail = {
                 "uid": uid,
-                "display_name": user_data.get("display_name", "User"),
-                "avatar_url": user_data.get("avatar_url"),
                 "joined_at": datetime.now(),
                 "role": "member"
             }
@@ -58,7 +56,7 @@ class ConversationRepository(BaseRepository):
         res = await doc_ref.get()
         return res.to_dict()    
     
-    async def remove_members(self, conversation_id: str, member_uids: list[str]) -> dict:
+    async def remove_members(self, conversation_id: str, member_uids: list[str]) -> dict | None:
         """Xóa thành viên khỏi một conversation."""
         doc_ref = self._collection.document(conversation_id)
         batch = self._get_db().batch()
@@ -79,7 +77,7 @@ class ConversationRepository(BaseRepository):
         await msg_ref.set(message_data)
         return message_data
     
-    async def delete_message(self, conversation_id: str, message_id: str) -> dict:
+    async def delete_message(self, conversation_id: str, message_id: str) -> bool:
         """Xóa một tin nhắn khỏi một conversation."""
         """Xóa tin nhắn cụ thể theo ID."""
         try:
@@ -101,6 +99,10 @@ class ConversationRepository(BaseRepository):
         messages = await query.get()
         return [msg.to_dict() for msg in messages]
 
+    async def get_message_by_id(self, conversation_id: str, message_id: str) -> dict | None:
+        doc = await self.db.collection("conversations").document(conversation_id)\
+                    .collection("messages").document(message_id).get()
+        return doc.to_dict() if doc.exists else None
 # --- CÁC HÀM XỬ LÝ SUB-COLLECTION CỦA USER --- (có thể sử dụng đến)
 
     async def upsert_user_conversation_summary(self, uid: str, conversation_id: str, summary_data: dict):

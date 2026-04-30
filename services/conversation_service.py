@@ -3,7 +3,7 @@ from datetime import datetime
 from fastapi import HTTPException
 
 from repositories.conversation_repo import conversation_repo
-from schemas.conversation_schema import ConversationResponse, ConversationCreateRequest, ConversationUpdateRequest, AddMembersRequest, SendMessageRequest
+from schemas.conversation_schema import ConversationResponse, ConversationCreateRequest, ConversationUpdateRequest, AddMembersRequest, SendMessageRequest, ConversationRole, ConversationMember
 from schemas.response_schema import ResponseSchema
 
 
@@ -231,6 +231,13 @@ class ConversationService:
         # Định nghĩa ID cố định cho cuộc hội thoại chatbot của User này
         chatbot_conv_id = f"chatbot_conv_{uid}"
         
+        member_objects = [
+        ConversationMember(
+            uid=uid, 
+            role=ConversationRole.OWNER, 
+            joined_at=datetime.now()
+        )
+    ]
         # Thử lấy hội thoại từ Database
         conv = await self.conversation_repository.get_by_id(chatbot_conv_id)
         if not conv:
@@ -241,7 +248,7 @@ class ConversationService:
                 "description": "Default chatbot conversation",
                 "created_at": datetime.now(),
                 "updated_at": datetime.now(),
-                "member_uids": [uid]
+                "member_uids": member_objects
             }
             await self.conversation_repository.create(new_data)
 
@@ -253,7 +260,7 @@ class ConversationService:
             description = "Default chatbot conversation",
             created_at = datetime.now(),
             updated_at = datetime.now(),
-            members = [uid])
+            members = member_objects)
         )
     
     async def get_recent_messages(self, conversation_id: str, limit: int = 20) -> ResponseSchema[list]:
