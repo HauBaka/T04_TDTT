@@ -8,7 +8,6 @@ class ConversationRepository(BaseRepository):
 
 
     async def create(self, conversation_data: dict) -> dict:
-        """Tạo một conversation mới."""
         """Tạo doc hội thoại mới trong collection 'conversations'."""
         doc_ref = self._collection.document()
         conversation_data["id"] = doc_ref.id
@@ -36,10 +35,6 @@ class ConversationRepository(BaseRepository):
 
         # Vòng lặp để tạo các bản thông tin cơ bản user
         for uid in member_uids:
-            # Lấy thông tin cơ bản từ User Repo
-            user_snap = await self._get_db().collection("users").document(uid).get()
-            user_data = user_snap.to_dict() if user_snap.exists else {}
-
             member_detail = {
                 "uid": uid,
                 "joined_at": datetime.now(),
@@ -89,6 +84,7 @@ class ConversationRepository(BaseRepository):
     async def delete(self, conversation_id: str) -> bool:
         """Xóa một conversation."""
         """Xóa hoàn toàn hội thoại."""
+        # TODO: Xóa sub-collection members và messages trước khi xóa doc chính
         await self._collection.document(conversation_id).delete()
         return True
     
@@ -100,7 +96,7 @@ class ConversationRepository(BaseRepository):
         return [msg.to_dict() for msg in messages]
 
     async def get_message_by_id(self, conversation_id: str, message_id: str) -> dict | None:
-        doc = await self.db.collection("conversations").document(conversation_id)\
+        doc = await self._get_db().collection("conversations").document(conversation_id)\
                     .collection("messages").document(message_id).get()
         return doc.to_dict() if doc.exists else None
 # --- CÁC HÀM XỬ LÝ SUB-COLLECTION CỦA USER --- (có thể sử dụng đến)
