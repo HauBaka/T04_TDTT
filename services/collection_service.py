@@ -137,7 +137,7 @@ class CollectionService:
             raise AppException(status_code=403, message="You do not have permission to add collaborators to this collection.")
         
         # Validate người dùng tồn tại
-        for uid in collaborator_uids:
+        for uid in collaborator_uids: # TODO: optimize bằng cách fetch nhiều user một lúc (dùng get_users của user_repo)
             user = await user_repo.get_user(uid)
             if not user:
                 raise NotFoundError(f"User {uid} not found.")
@@ -251,7 +251,7 @@ class CollectionService:
             collection_data["places"] = list(places.values())
             collection_data["collaborators"] = list(collaborators.values())
 
-        collection = CollectionPublic(
+        collection = CollectionPublic( # TODO: bổ sung thêm saved_count và savers
             id = collection_data.get("id", ""),
             owner_uid = collection_data.get("owner_uid", ""),
             name = collection_data.get("name", ""),
@@ -265,5 +265,18 @@ class CollectionService:
             visibility = CollectionVisibility(collection_data.get("visibility", "public"))
         )
         return ResponseSchema(data=CollectionResponse(collection=collection))
+
+    async def save_collection(self, collection_id: str, requester_id: str) -> ResponseSchema[bool]:
+        """Lưu một collection vào danh sách đã lưu của người dùng."""
+        # lưu vào: 
+        #  > collections/{collection_id}/savers "sub-collection" với uid, saved_at
+        #  > users/{uid}/saved_collections "array" gồm collection_id
+        # đồng thời tăng saved_count của collection
+
+        return ResponseSchema(data=True)
+    
+    async def unsave_collection(self, collection_id: str, requester_id: str) -> ResponseSchema[bool]:
+        """Bỏ lưu một collection khỏi danh sách đã lưu của người dùng."""
+        return ResponseSchema(data=True)
 
 collection_service = CollectionService()

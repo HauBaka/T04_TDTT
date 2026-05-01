@@ -4,9 +4,6 @@ from enum import Enum
 
 class CollectionCollaborator(BaseModel):
     uid: str
-    display_name: str
-    username: str
-    avatar_url: str | None = None
     contributed_count: int = 0 # số lượng địa điểm mà cộng tác viên đã thêm vào collection
     joined_at: datetime # thời điểm cộng tác viên được thêm vào collection
 
@@ -31,9 +28,9 @@ class Modification(BaseModel):
     target_type: TargetType  # "place", "collaborator", hoặc "tag"
     action: ModifyAction
 
-class CollectionLiked(BaseModel):
+class CollectionSaver(BaseModel):
     uid: str
-    liked_at: datetime
+    saved_at: datetime
 
 class CollectionVisibility(str, Enum):
     PUBLIC = "public"
@@ -48,8 +45,8 @@ class CollectionPublic(BaseModel):
     thumbnail_url: str | None = None
     created_at: datetime
     updated_at: datetime
-    liked_count: int = 0
-    liked: list[CollectionLiked] = Field(default_factory=list)
+    saved_count: int = 0
+    savers: list[CollectionSaver] = Field(default_factory=list)
     collaborators: list[CollectionCollaborator] = Field(default_factory=list)
     places: list[CollectionPlace] = Field(default_factory=list) 
     

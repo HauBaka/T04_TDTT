@@ -150,7 +150,7 @@ class HotelRepository(BaseRepository):
             return {}
         
         hotels = {}
-        for token in property_tokens:
+        for token in property_tokens: # TODO: chạy song song + batch để tối ưu
             try:
                 doc = await self._collection.document(token).get()
                 if doc.exists:

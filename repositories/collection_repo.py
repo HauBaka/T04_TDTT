@@ -36,8 +36,6 @@ class CollectionRepository(BaseRepository):
         self,
         collection_id: str,
         update_data: dict,
-        requester_id: str | None = None,
-        collaborator_additions: dict[str, dict] | None = None,
     ) -> dict:
         """Cập nhật một collection của người dùng."""
         ref = self._collection.document(collection_id)
@@ -59,6 +57,7 @@ class CollectionRepository(BaseRepository):
 
     async def delete_collection(self, collection_id: str) -> bool:
         """Xóa một collection của người dùng."""
+        # TODO: Cần xóa cả sub-collections trước
         return await self._delete(collection_id)
 
     async def get_collection(self, collection_id: str) -> dict:
@@ -69,12 +68,12 @@ class CollectionRepository(BaseRepository):
         """Lấy danh sách places từ sub-collection."""
         try:
             places_ref = self._collection.document(collection_id).collection("places")
-            docs = await places_ref.stream()
-            
             places = {}
-            async for doc in docs:
+            async for doc in places_ref.stream():
                 if doc.exists:
-                    places[doc.id] = doc.to_dict() or {}
+                    data = doc.to_dict() or {}
+                    data["place_id"] = doc.id
+                    places[doc.id] = data
             return places
         except Exception as e:
             logger.error(f"Error getting places from subcollection for collection {collection_id}: {str(e)}")
@@ -84,12 +83,12 @@ class CollectionRepository(BaseRepository):
         """Lấy danh sách collaborators từ sub-collection."""
         try:
             collab_ref = self._collection.document(collection_id).collection("collaborators")
-            docs = await collab_ref.stream()
-            
             collaborators = {}
-            async for doc in docs:
+            async for doc in collab_ref.stream():
                 if doc.exists:
-                    collaborators[doc.id] = doc.to_dict() or {}
+                    data = doc.to_dict() or {}
+                    data["uid"] = doc.id
+                    collaborators[doc.id] = data
             return collaborators
         except Exception as e:
             logger.error(f"Error getting collaborators from subcollection for collection {collection_id}: {str(e)}")
@@ -128,6 +127,7 @@ class CollectionRepository(BaseRepository):
         for place_id in new_place_ids:
             place_ref = places_collection.document(place_id)
             batch.set(place_ref, {
+                "place_id": place_id,
                 "added_at": timestamp,
                 "added_by": requester_id
             })
@@ -207,6 +207,7 @@ class CollectionRepository(BaseRepository):
         for uid in new_uids:
             collab_ref = collab_collection.document(uid)
             batch.set(collab_ref, {
+                "uid": uid,
                 "contributed_count": 0,
                 "joined_at": timestamp
             })
@@ -272,6 +273,7 @@ class CollectionRepository(BaseRepository):
         current_tags = current_data.get("tags", [])
         
         # Thêm tags mới, tránh duplicate
+        # TODO: ArrayUnion của Firestore có thể giúp tối ưu phần này
         for tag in new_tags:
             if tag not in current_tags:
                 current_tags.append(tag)
@@ -298,6 +300,7 @@ class CollectionRepository(BaseRepository):
         current_tags = current_data.get("tags", [])
         
         # Loại bỏ tags
+        # TODO: ArrayRemove của Firestore có thể giúp tối ưu phần này
         remaining_tags = [t for t in current_tags if t not in tags_to_remove]
         
         update_payload = {
