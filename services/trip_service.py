@@ -32,11 +32,12 @@ class TripService:
             "avatar_url": creator_info.get("avatar_url"),
             "role": "owner"
         }
-        await self.trip_repo.add_member_to_subcollection(trip_id, creator_uid, member_data)
+        updated_trip = await self.trip_repo.add_members(trip_id, member_data)
         
         return ResponseSchema(
             message="Trip created successfully",
-            data=TripResponse(**new_trip))
+            data=TripResponse(**(updated_trip or new_trip))
+        )
     
     async def get_trip(self, trip_id: str, requester_uid: str | None) -> ResponseSchema[TripResponse]:
         """Lấy thông tin một trip theo ID."""
@@ -54,15 +55,18 @@ class TripService:
         trip = await self.trip_repo.get_by_id(trip_id)
         if not trip:
             raise NotFoundError("Trip not found.")
+            
         owner_uid = trip.get("owner_uid")
         if requester_uid != owner_uid:
             raise AppException(status_code=403, message="Only the trip owner can update this trip.")
+            
         trip_status = trip.get("status", TripStatus.WAITING.value)
         if trip_status != TripStatus.WAITING.value:
             raise AppException(
                 status_code=400, 
                 message="Can only update trip details when status is WAITING."
             )
+            
         update_payload = update_data.model_dump(exclude_unset=True)
         updated_trip = await self.trip_repo.update(trip_id, update_payload)
         
@@ -87,37 +91,34 @@ class TripService:
     
     async def add_members_to_trip(self, trip_id: str, requester_uid: str, member_uids: list[str]) -> ResponseSchema[TripResponse]:
         """Thêm nhiều thành viên vào một trip."""
-        if not member_uids:
-            raise AppException(status_code=400, message="Member list cannot be empty.")
-        
         trip = await self.trip_repo.get_by_id(trip_id)
         if not trip:
             raise NotFoundError("Trip not found.")
+            
         current_members = trip.get("member_uids", [])
         if requester_uid not in current_members:
             raise AppException(status_code=403, message="You must be a member to add others.")
+            
         new_member_uids = [uid for uid in member_uids if uid not in current_members]
-        
         if not new_member_uids:
             raise AppException(status_code=400, message="All members are already in this trip.")
+        users_info = await self.user_repo.get_users(new_member_uids)
+        
+        members_data_to_add = {}
         for uid in new_member_uids:
-            user_info = await self.user_repo.get_user(uid)
+            user_info = users_info.get(uid)
             if not user_info:
-                raise NotFoundError(f"User {uid} not found.")
-        updated_trip = await self.trip_repo.add_members(trip_id, new_member_uids)
+                raise NotFoundError(f"User {uid} not found in system.")
+                
+            members_data_to_add[uid] = {
+                "display_name": user_info.get("display_name", "Unknown"),
+                "avatar_url": user_info.get("avatar_url"),
+                "role": "member"
+            }
+        updated_trip = await self.trip_repo.add_members(trip_id, members_data_to_add)
         
         if not updated_trip:
             raise AppException(status_code=500, message="Failed to add members to trip.")
-        
-        for uid in new_member_uids:
-            user_info = await self.user_repo.get_user(uid)
-            if user_info:
-                member_data = {
-                    "display_name": user_info.get("display_name", "Unknown"),
-                    "avatar_url": user_info.get("avatar_url"),
-                    "role": "member"
-                }
-                await self.trip_repo.add_member_to_subcollection(trip_id, uid, member_data)
         
         return ResponseSchema(data=TripResponse(**updated_trip))
     async def remove_members_from_trip(self, trip_id: str, requester_uid: str, target_uids: list[str]) -> ResponseSchema[TripResponse]:
@@ -151,16 +152,12 @@ class TripService:
                     status_code=403, 
                     message="You do not have permission to remove other members."
                 )
-        
-        # Xóa members từ trip
+
+        # Xóa member data từ subcollection
         updated_trip = await self.trip_repo.remove_members(trip_id, target_uids)
         
         if not updated_trip:
             raise AppException(status_code=500, message="Failed to remove members from trip.")
-        
-        # Xóa member data từ subcollection
-        for uid in target_uids:
-            await self.trip_repo.remove_member_from_subcollection(trip_id, uid)
         
         return ResponseSchema(data=TripResponse(**updated_trip))
     

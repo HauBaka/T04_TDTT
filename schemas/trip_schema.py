@@ -35,7 +35,14 @@ class TripCreateRequest(BaseModel):
     place_id: str = Field(..., description="ID địa điểm đích đến")
     start_at: datetime
     end_at: datetime
-
+class TripAddMembersRequest(BaseModel):
+    """schema dùng cho API thêm thành viên"""
+    member_uids: list[str] = Field(...,min_length=1,description="Danh sách UID thành viên muốn thêm. Không được để rỗng.")
+    
+class TripRemoveMembersRequest(BaseModel):
+    """Schema dùng cho API xóa thành viên"""
+    target_uids: list[str] = Field(..., min_length=1, description="Danh sách UID thành viên muốn xóa. Không được để rỗng.")
+    
 class TripUpdateRequest(BaseModel):
     """Chỉ owner mới được gọi và chỉ khi status là WAITING"""
     name: str | None = None
