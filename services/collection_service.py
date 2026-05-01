@@ -1,5 +1,7 @@
+import asyncio
 from datetime import datetime, timezone
 from repositories.user_repo import user_repo
+from repositories.hotel_repo import hotel_repo
 from schemas.collection_schema import CollectionPublic, CollectionResponse, CollectionVisibility, CollectionPlace, CollectionCollaborator
 from repositories.collection_repo import collection_repo
 from core.exceptions import AppException, NotFoundError
@@ -18,7 +20,7 @@ class CollectionService:
         if not created_collection:
             raise AppException(status_code=500, message="Failed to create collection.")
         
-        return self.build_response(created_collection)
+        return await self.build_response(created_collection)
     
     async def get_collection(self, collection_id: str, requester_id: str | None) -> ResponseSchema[CollectionResponse]:
         """Lấy thông tin của một collection cụ thể."""
@@ -26,40 +28,41 @@ class CollectionService:
         if not collection:
             raise NotFoundError("Invalid collection ID.")
         
+        places_dict, collaborators_dict = await asyncio.gather(
+            self.collection_repo._get_places_from_subcollection(collection_id),
+            self.collection_repo._get_collaborators_from_subcollection(collection_id)
+        )
+        
         visibility = CollectionVisibility(collection.get("visibility", CollectionVisibility.PUBLIC.value))
         owner_uid = collection.get("owner_uid", "")
-        collaborators = collection.get("collaborators", [])
+        collaborator_uids = collaborators_dict
 
         if visibility == CollectionVisibility.PRIVATE:
-            collaborator_uids = [
-                c.get("uid") for c in collaborators 
-                if isinstance(c, dict) and "uid" in c
-            ]
-
             if requester_id != owner_uid and requester_id not in collaborator_uids:
                 raise AppException(status_code=403, message="You do not have permission to view this collection.")
         
-        return self.build_response(collection)
+        collection["places"] = list(places_dict.values())
+        collection["collaborators"] = list(collaborators_dict.values())
+
+        return await self.build_response(collection)
     
     async def update_collection(self, collection_id: str, requester_id: str, update_data: dict) -> ResponseSchema[CollectionResponse]:
-        """Cập nhật thông tin của một collection."""
+        """Cập nhật thông tin của một collection. Chỉ owner mới có thể cập nhật."""
 
         # Check collection có tồn tại không
         collection = await collection_repo.get_collection(collection_id)
         if not collection:
             raise NotFoundError("Invalid collection ID.")
         
-        # Check requester 
+        # Check requester - chỉ owner mới có thể update
+        owner_uid = collection.get("owner_uid", "")
+        if requester_id != owner_uid:
+            raise AppException(status_code=403, message="You do not have permission to edit this collection.")
+        
+        # Check requester user exists
         requester = await user_repo.get_user(requester_id)
         if not requester:
             raise NotFoundError("User not found.")
-
-        owner_uid = collection.get("owner_uid", "")
-        collaborators = collection.get("collaborators", [])
-        collaborators_ids = [c.get("uid") for c in collaborators if isinstance(c, dict) and "uid" in c]
-
-        if requester_id != owner_uid and requester_id not in collaborators_ids:
-            raise AppException(status_code=403, message="You do not have permission to edit this collection.")
 
         # So sánh với default liked collection
         if collection.get("id") == requester.get("liked_collection", ""):
@@ -70,7 +73,7 @@ class CollectionService:
         if not updated_data:
             raise AppException(status_code=500, message="Failed to update collection.")
         
-        return self.build_response(updated_data)
+        return await self.build_response(updated_data)
         
     async def add_places_to_collection(self, collection_id: str, requester_id: str, place_ids: list[str]) -> ResponseSchema[CollectionResponse]:
         """Thêm nhiều địa điểm vào một collection."""
@@ -81,28 +84,23 @@ class CollectionService:
         
         # Check quyền
         owner_uid = collection.get("owner_uid", "")
-        collaborators = collection.get("collaborators", [])
-        collaborators_ids = [c.get("uid") for c in collaborators if isinstance(c, dict) and "uid" in c]
+        collaborators = await self.collection_repo._get_collaborators_from_subcollection(collection_id)
+        collaborators_ids = collaborators
         
         if requester_id != owner_uid and requester_id not in collaborators_ids:
             raise AppException(status_code=403, message="You do not have permission to edit this collection.")
         
-        # Tạo place objects
-        timestamp = datetime.now(timezone.utc)
-        places_to_add = [
-            CollectionPlace(
-                place_id=place_id,
-                added_at=timestamp,
-                added_by=requester_id
-            ).model_dump() for place_id in place_ids
-        ]
-        
-        # Thêm vào collection
-        updated_collection = await collection_repo.add_places_to_collection(collection_id, places_to_add)
+        # Thêm vào collection (với lọc duplicate, check existence, lưu vào sub-collection)
+        updated_collection = await collection_repo.add_places_to_collection(
+            collection_id, 
+            place_ids, 
+            requester_id,
+            hotel_repo=hotel_repo
+        )
         if not updated_collection:
             raise AppException(status_code=500, message="Failed to add places to collection.")
         
-        return self.build_response(updated_collection)
+        return await self.build_response(updated_collection)
 
     async def remove_places_from_collection(self, collection_id: str, requester_id: str, place_ids: list[str]) -> ResponseSchema[CollectionResponse]:
         """Xóa nhiều địa điểm khỏi một collection."""
@@ -113,9 +111,9 @@ class CollectionService:
         
         # Check quyền
         owner_uid = collection.get("owner_uid", "")
-        collaborators = collection.get("collaborators", [])
-        collaborators_ids = [c.get("uid") for c in collaborators if isinstance(c, dict) and "uid" in c]
-        
+        collaborators = await self.collection_repo._get_collaborators_from_subcollection(collection_id)
+        collaborators_ids = collaborators
+
         if requester_id != owner_uid and requester_id not in collaborators_ids:
             raise AppException(status_code=403, message="You do not have permission to edit this collection.")
         
@@ -124,10 +122,10 @@ class CollectionService:
         if not updated_collection:
             raise AppException(status_code=500, message="Failed to remove places from collection.")
         
-        return self.build_response(updated_collection)
+        return await self.build_response(updated_collection)
     
     async def add_collaborators_to_collection(self, collection_id: str, requester_id: str, collaborator_uids: list[str]) -> ResponseSchema[CollectionResponse]:
-        """Thêm nhiều cộng tác viên vào một collection. Gửi invitation"""
+        """Thêm nhiều cộng tác viên vào một collection."""
         # Check collection có tồn tại không
         collection = await collection_repo.get_collection(collection_id)
         if not collection:
@@ -138,34 +136,21 @@ class CollectionService:
         if requester_id != owner_uid:
             raise AppException(status_code=403, message="You do not have permission to add collaborators to this collection.")
         
-        # Lấy thông tin người dùng để tạo collaborator objects
-        timestamp = datetime.now(timezone.utc)
-        collaborators_to_add = []
-        
+        # Validate người dùng tồn tại
         for uid in collaborator_uids:
             user = await user_repo.get_user(uid)
             if not user:
                 raise NotFoundError(f"User {uid} not found.")
-            
-            collaborator = CollectionCollaborator(
-                uid=uid,
-                display_name=user.get("display_name", ""),
-                username=user.get("username", ""),
-                avatar_url=user.get("avatar_url", None),
-                contributed_count=0,
-                joined_at=timestamp
-            )
-            collaborators_to_add.append(collaborator.model_dump())
         
-        # Thêm vào collection
-        updated_collection = await collection_repo.add_collaborators_to_collection(collection_id, collaborators_to_add)
+        # Thêm vào collection (lưu vào sub-collection với uid, contributed_count, joined_at)
+        updated_collection = await collection_repo.add_collaborators_to_collection(collection_id, collaborator_uids)
         if not updated_collection:
             raise AppException(status_code=500, message="Failed to add collaborators to collection.")
         
-        return self.build_response(updated_collection)
-    
+        return await self.build_response(updated_collection)
+
     async def remove_collaborators_from_collection(self, collection_id: str, requester_id: str, collaborator_uids: list[str]) -> ResponseSchema[CollectionResponse]:
-        """Xóa nhiều cộng tác viên khỏi một collection. Gửi notification"""
+        """Xóa nhiều cộng tác viên khỏi một collection. Tránh xóa owner."""
         # Check collection có tồn tại không
         collection = await collection_repo.get_collection(collection_id)
         if not collection:
@@ -176,12 +161,16 @@ class CollectionService:
         if requester_id != owner_uid:
             raise AppException(status_code=403, message="You do not have permission to remove collaborators from this collection.")
         
+        # Kiểm tra không xóa owner
+        if owner_uid in collaborator_uids:
+            raise AppException(status_code=403, message="Cannot remove the owner from collaborators.")
+        
         # Xóa từ collection
         updated_collection = await collection_repo.remove_collaborators_from_collection(collection_id, collaborator_uids)
         if not updated_collection:
             raise AppException(status_code=500, message="Failed to remove collaborators from collection.")
         
-        return self.build_response(updated_collection)
+        return await self.build_response(updated_collection)
     
     async def add_tags_to_collection(self, collection_id: str, requester_id: str, tags: list[str]) -> ResponseSchema[CollectionResponse]:
         """Thêm nhiều tag vào một collection."""
@@ -192,9 +181,9 @@ class CollectionService:
         
         # Check quyền
         owner_uid = collection.get("owner_uid", "")
-        collaborators = collection.get("collaborators", [])
-        collaborators_ids = [c.get("uid") for c in collaborators if isinstance(c, dict) and "uid" in c]
-        
+        collaborators = await self.collection_repo._get_collaborators_from_subcollection(collection_id)
+        collaborators_ids = collaborators
+
         if requester_id != owner_uid and requester_id not in collaborators_ids:
             raise AppException(status_code=403, message="You do not have permission to edit this collection.")
         
@@ -203,7 +192,7 @@ class CollectionService:
         if not updated_collection:
             raise AppException(status_code=500, message="Failed to add tags to collection.")
         
-        return self.build_response(updated_collection)
+        return await self.build_response(updated_collection)
 
     async def remove_tags_from_collection(self, collection_id: str, requester_id: str, tags: list[str]) -> ResponseSchema[CollectionResponse]:
         """Xóa nhiều tag khỏi một collection."""
@@ -214,8 +203,8 @@ class CollectionService:
         
         # Check quyền
         owner_uid = collection.get("owner_uid", "")
-        collaborators = collection.get("collaborators", [])
-        collaborators_ids = [c.get("uid") for c in collaborators if isinstance(c, dict) and "uid" in c]
+        collaborators = await self.collection_repo._get_collaborators_from_subcollection(collection_id)
+        collaborators_ids = collaborators
         
         if requester_id != owner_uid and requester_id not in collaborators_ids:
             raise AppException(status_code=403, message="You do not have permission to edit this collection.")
@@ -225,7 +214,7 @@ class CollectionService:
         if not updated_collection:
             raise AppException(status_code=500, message="Failed to remove tags from collection.")
         
-        return self.build_response(updated_collection)
+        return await self.build_response(updated_collection)    
 
     async def delete_collection(self, collection_id: str, requester_id: str) -> ResponseSchema[bool]:
         """Xóa một collection."""
@@ -247,11 +236,21 @@ class CollectionService:
         
         return ResponseSchema(data=await collection_repo.delete_collection(collection_id))
     
-    def build_response(self, collection_data: dict) -> ResponseSchema[CollectionResponse]:
+    async def build_response(self, collection_data: dict) -> ResponseSchema[CollectionResponse]:
         """Xây dựng response cho collection."""
         if not collection_data:
             raise NotFoundError("Invalid collection ID.")
         
+        collection_id = collection_data.get("id", "")
+        
+        if "places" not in collection_data or "collaborators" not in collection_data:
+            places, collaborators = await asyncio.gather(
+                self.collection_repo._get_places_from_subcollection(collection_id),
+                self.collection_repo._get_collaborators_from_subcollection(collection_id)
+            )
+            collection_data["places"] = list(places.values())
+            collection_data["collaborators"] = list(collaborators.values())
+
         collection = CollectionPublic(
             id = collection_data.get("id", ""),
             owner_uid = collection_data.get("owner_uid", ""),

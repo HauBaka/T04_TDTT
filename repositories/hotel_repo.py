@@ -144,4 +144,36 @@ class HotelRepository(BaseRepository):
 
         return hotels
 
+    async def get_hotels(self, property_tokens: list[str]) -> dict[str, dict]:
+        """Lấy thông tin nhiều khách sạn từ danh sách property tokens."""
+        if not property_tokens:
+            return {}
+        
+        hotels = {}
+        for token in property_tokens:
+            try:
+                doc = await self._collection.document(token).get()
+                if doc.exists:
+                    hotels[token] = doc.to_dict()
+            except Exception as e:
+                logger.error(f"Error fetching hotel {token}: {str(e)}")
+        
+        return hotels
+    
+    async def get_places(self, place_ids: list[str]) -> list[dict]:
+        """Lấy thông tin nhiều địa điểm (places) dựa trên place_ids."""
+        if not place_ids:
+            return []
+        
+        places = []
+        hotel_data = await self.get_hotels(place_ids)
+        
+        for place_id in place_ids:
+            if place_id in hotel_data:
+                place_info = hotel_data[place_id].copy()
+                place_info['id'] = place_id  # Thêm id vào object
+                places.append(place_info)
+        
+        return places
+
 hotel_repo = HotelRepository()
