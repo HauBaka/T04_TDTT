@@ -13,6 +13,7 @@ class UserRepository(BaseRepository):
             return None
         await self._create(user_data, uid)
         return uid
+    
     async def get_users(self, uids: list[str]) -> dict[str, dict]:
         """
         Lấy thông tin của nhiều user cùng lúc.
@@ -23,7 +24,7 @@ class UserRepository(BaseRepository):
         unique_uids = list(set(uids))
         result = {}
         chunk_size = 30
-        for i in range(0, len(unique_uids), chunk_size):
+        for i in range(0, len(unique_uids), chunk_size): # TODO: chạy song song để tăng tốc độ
             chunk = unique_uids[i:i + chunk_size]
             docs = await self._collection.where("uid", "in", chunk).get()
             
@@ -35,6 +36,7 @@ class UserRepository(BaseRepository):
                     result[doc.id] = user_data
 
         return result   
+    
     async def update_user(self, uid: str, update_data: dict) -> None:
         # NOTE: Để service xử lý exceptions
         await self._update(uid, update_data)

@@ -26,10 +26,6 @@ class TripMemberTracking(BaseModel):
     updated_at: datetime
     status: MemberTrackingStatus = MemberTrackingStatus.NO_SHARE
     
-    # Thông tin bổ sung để hiển thị trên bản đồ mà không cần fetch UserRepo
-    display_name: str | None = None
-    avatar_url: str | None = None
-
 class TripCreateRequest(BaseModel):
     name: str = Field(..., min_length=3, max_length=50)
     place_id: str = Field(..., description="ID địa điểm đích đến")

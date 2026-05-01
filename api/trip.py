@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from schemas.response_schema import ResponseSchema
 from core.dependencies import get_current_user
 from services.trip_service import trip_service
-from schemas.trip_schema import TripCreateRequest, TripResponse, TripUpdateRequest
+from schemas.trip_schema import TripCreateRequest, TripMemberTracking, TripResponse, TripUpdateRequest, TripAddMembersRequest, TripRemoveMembersRequest
 
 trip_router = APIRouter()
 
@@ -27,12 +27,16 @@ async def delete_trip(trip_id: str, requester=Depends(get_current_user(optional=
     return await trip_service.delete_trip(trip_id, requester.get("uid"))
 
 @trip_router.post("/trips/{trip_id}/members", response_model=ResponseSchema[TripResponse])
-async def add_members_to_trip(trip_id: str, member_uids: list[str], requester=Depends(get_current_user(optional=False))):
+async def add_members_to_trip(trip_id: str, body: TripAddMembersRequest, requester=Depends(get_current_user(optional=False))):
     """Thêm nhiều thành viên vào một trip."""
-    return await trip_service.add_members_to_trip(trip_id, requester.get("uid"), member_uids)
+    return await trip_service.add_members_to_trip(trip_id, requester.get("uid"), body.member_uids)
 
 @trip_router.delete("/trips/{trip_id}/members", response_model=ResponseSchema[TripResponse])
-async def remove_members_from_trip(trip_id: str, target_uids: list[str], requester=Depends(get_current_user(optional=False))):
+async def remove_members_from_trip(trip_id: str, body: TripRemoveMembersRequest, requester=Depends(get_current_user(optional=False))):
     """Xóa nhiều thành viên khỏi một trip."""
-    return await trip_service.remove_members_from_trip(trip_id, requester.get("uid"), target_uids)
+    return await trip_service.remove_members_from_trip(trip_id, requester.get("uid"), body.target_uids)
 
+@trip_router.get("/trips/{trip_id}/members", response_model=ResponseSchema[list[TripMemberTracking]])
+async def get_trip_members(trip_id: str, requester=Depends(get_current_user(optional=False))):
+    """Lấy thông tin thành viên của một trip."""
+    return await trip_service.get_trip_members(trip_id, requester.get("uid"))

@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from core.exceptions import AppException, NotFoundError
 from schemas.response_schema import ResponseSchema
 from schemas.response_schema import ResponseSchema
-from schemas.trip_schema import TripCreateRequest, TripResponse, TripStatus, TripUpdateRequest
+from schemas.trip_schema import TripCreateRequest, TripMemberTracking, TripResponse, TripStatus, TripUpdateRequest
 from repositories.trip_repo import trip_repo
 from repositories.user_repo import user_repo
 
@@ -28,9 +28,11 @@ class TripService:
         if not trip_id:
             raise AppException(status_code = 500, message = "Trip ID is missing after creation.")
         member_data = {
-            "display_name": creator_info.get("display_name", "Unknown"),
-            "avatar_url": creator_info.get("avatar_url"),
-            "role": "owner"
+            creator_uid: {
+                "display_name": creator_info.get("display_name", "Unknown"),
+                "avatar_url": creator_info.get("avatar_url"),
+                "role": "owner"
+            }
         }
         updated_trip = await self.trip_repo.add_members(trip_id, member_data)
         
@@ -91,10 +93,11 @@ class TripService:
     
     async def add_members_to_trip(self, trip_id: str, requester_uid: str, member_uids: list[str]) -> ResponseSchema[TripResponse]:
         """Thêm nhiều thành viên vào một trip."""
+        # TODO: chỉ có thể thêm khi trip đang ở trạng thái WAITING
         trip = await self.trip_repo.get_by_id(trip_id)
         if not trip:
             raise NotFoundError("Trip not found.")
-            
+        
         current_members = trip.get("member_uids", [])
         if requester_uid not in current_members:
             raise AppException(status_code=403, message="You must be a member to add others.")
@@ -121,6 +124,7 @@ class TripService:
             raise AppException(status_code=500, message="Failed to add members to trip.")
         
         return ResponseSchema(data=TripResponse(**updated_trip))
+    
     async def remove_members_from_trip(self, trip_id: str, requester_uid: str, target_uids: list[str]) -> ResponseSchema[TripResponse]:
         """Xóa nhiều thành viên khỏi một trip."""
         if not target_uids:
@@ -160,5 +164,17 @@ class TripService:
             raise AppException(status_code=500, message="Failed to remove members from trip.")
         
         return ResponseSchema(data=TripResponse(**updated_trip))
-    
+
+    async def get_trip_members(self, trip_id: str, requester_uid: str) -> ResponseSchema[list[TripMemberTracking]]:
+        """Lấy thông tin thành viên của một trip."""
+        # TODO: chỉ có thể xem khi là member của trip đó
+        trip = await self.trip_repo.get_by_id(trip_id)
+        if not trip:
+            raise NotFoundError("Trip not found.")
+        
+        members_data = await self.trip_repo.get_members(trip_id)
+        members = [TripMemberTracking(**member) for member in members_data]
+        
+        return ResponseSchema(data=members)
+
 trip_service = TripService()
