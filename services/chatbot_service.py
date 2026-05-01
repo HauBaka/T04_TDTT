@@ -1974,7 +1974,7 @@ class ChatbotService:
             if score > intent_scores[intent]:
                 intent_scores[intent] = score
 
-        best_intent = max(intent_scores, key=intent_scores.get)
+        best_intent = max(intent_scores, key=lambda candidate_intent: intent_scores[candidate_intent])
         if intent_scores[best_intent] < 0.30:
             return None
         return best_intent
