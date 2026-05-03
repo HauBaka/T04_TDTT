@@ -1,4 +1,5 @@
 import asyncio
+from google.cloud import firestore as fs
 from datetime import datetime, timezone
 from repositories.user_repo import user_repo
 from repositories.hotel_repo import hotel_repo
@@ -137,10 +138,12 @@ class CollectionService:
             raise AppException(status_code=403, message="You do not have permission to add collaborators to this collection.")
         
         # Validate người dùng tồn tại
-        for uid in collaborator_uids: # TODO: optimize bằng cách fetch nhiều user một lúc (dùng get_users của user_repo)
-            user = await user_repo.get_user(uid)
-            if not user:
-                raise NotFoundError(f"User {uid} not found.")
+        if collaborator_uids:
+            existing_users = await user_repo.get_users(collaborator_uids)
+            existing_uids = set(existing_users.keys())
+            not_found_uids = [uid for uid in collaborator_uids if uid not in existing_uids]
+            if not_found_uids:
+                raise NotFoundError(f"Users {not_found_uids} not found.")
         
         # Thêm vào collection (lưu vào sub-collection với uid, contributed_count, joined_at)
         updated_collection = await collection_repo.add_collaborators_to_collection(collection_id, collaborator_uids)
@@ -251,7 +254,7 @@ class CollectionService:
             collection_data["places"] = list(places.values())
             collection_data["collaborators"] = list(collaborators.values())
 
-        collection = CollectionPublic( # TODO: bổ sung thêm saved_count và savers
+        collection = CollectionPublic(
             id = collection_data.get("id", ""),
             owner_uid = collection_data.get("owner_uid", ""),
             name = collection_data.get("name", ""),
@@ -259,6 +262,8 @@ class CollectionService:
             thumbnail_url = collection_data.get("thumbnail_url", None),
             created_at = collection_data.get("created_at", datetime.now(timezone.utc)),
             updated_at = collection_data.get("updated_at", datetime.now(timezone.utc)),
+            saved_count = collection_data.get("saved_count", 0),
+            savers = collection_data.get("savers", []),
             collaborators = collection_data.get("collaborators", []),
             places = collection_data.get("places", []),
             tags = collection_data.get("tags", []),
@@ -268,15 +273,99 @@ class CollectionService:
 
     async def save_collection(self, collection_id: str, requester_id: str) -> ResponseSchema[bool]:
         """Lưu một collection vào danh sách đã lưu của người dùng."""
-        # lưu vào: 
-        #  > collections/{collection_id}/savers "sub-collection" với uid, saved_at
-        #  > users/{uid}/saved_collections "array" gồm collection_id
-        # đồng thời tăng saved_count của collection
+        # Check collection tồn tại
+        collection = await collection_repo.get_collection(collection_id)
+        if not collection:
+            raise NotFoundError("Invalid collection ID.")
+        
+        # Check user tồn tại
+        user = await user_repo.get_user(requester_id)
+        if not user:
+            raise NotFoundError("User not found.")
+        
+        # Batch update:
+        # > collections/{collection_id}/savers (sub-collection) thêm uid, saved_at
+        # > users/{uid}/saved_collections (array) thêm collection_id
+        # > collection.saved_count tăng 1
 
+        saver_ref = collection_repo._collection.document(collection_id).collection("savers").document(requester_id)
+        saver_snapshot = await saver_ref.get()
+        if saver_snapshot.exists:
+            raise AppException(status_code=400, message="Collection already saved.")
+        
+        db = collection_repo._get_db()
+        batch = db.batch()
+        timestamp = datetime.now(timezone.utc)
+        
+        collection_ref = collection_repo._collection.document(collection_id)
+        user_ref = user_repo._collection.document(requester_id)
+        
+        # Thêm vào savers sub-collection
+        saver_ref = collection_ref.collection("savers").document(requester_id)
+        batch.set(saver_ref, {
+            "uid": requester_id,
+            "saved_at": timestamp
+        })
+        
+        # Thêm collection_id vào saved_collections array của user
+        batch.update(user_ref, {
+            "saved_collections": fs.ArrayUnion([collection_id])
+        })
+        
+        # Tăng saved_count
+        batch.update(collection_ref, {
+            "saved_count": fs.Increment(1),
+            "updated_at": timestamp
+        })
+        
+        await batch.commit()
         return ResponseSchema(data=True)
     
     async def unsave_collection(self, collection_id: str, requester_id: str) -> ResponseSchema[bool]:
         """Bỏ lưu một collection khỏi danh sách đã lưu của người dùng."""
+        # Check collection tồn tại
+        collection = await collection_repo.get_collection(collection_id)
+        if not collection:
+            raise NotFoundError("Invalid collection ID.")
+        
+        # Check user tồn tại
+        user = await user_repo.get_user(requester_id)
+        if not user:
+            raise NotFoundError("User not found.")
+        
+        # Batch update:
+        # > collections/{collection_id}/savers (sub-collection) xóa uid
+        # > users/{uid}/saved_collections (array) xóa collection_id
+        # > collection.saved_count giảm 1
+
+        saver_ref = collection_repo._collection.document(collection_id).collection("savers").document(requester_id)
+        saver_snapshot = await saver_ref.get()
+        if not saver_snapshot.exists:
+            raise AppException(status_code=400, message="Collection not saved yet.")
+        
+        db = collection_repo._get_db()
+        batch = db.batch()
+        timestamp = datetime.now(timezone.utc)
+        
+        collection_ref = collection_repo._collection.document(collection_id)
+        user_ref = user_repo._collection.document(requester_id)
+        
+        # Xóa từ savers sub-collection
+        saver_ref = collection_ref.collection("savers").document(requester_id)
+        batch.delete(saver_ref)
+        
+        # Xóa collection_id từ saved_collections array của user
+        batch.update(user_ref, {
+            "saved_collections": fs.ArrayRemove([collection_id])
+        })
+        
+        # Giảm saved_count
+        batch.update(collection_ref, {
+            "saved_count": fs.Increment(-1),
+            "updated_at": timestamp
+        })
+        
+        await batch.commit()
         return ResponseSchema(data=True)
 
 collection_service = CollectionService()

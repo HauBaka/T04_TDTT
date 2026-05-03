@@ -57,8 +57,23 @@ class CollectionRepository(BaseRepository):
 
     async def delete_collection(self, collection_id: str) -> bool:
         """Xóa một collection của người dùng."""
-        # TODO: Cần xóa cả sub-collections trước
-        return await self._delete(collection_id)
+        ref = self._collection.document(collection_id)
+        batch = self._get_db().batch()
+        
+        # Xóa sub-collections trước 
+        places_ref = ref.collection("places")
+        async for doc in places_ref.stream():
+            batch.delete(doc.reference)
+        
+        collab_ref = ref.collection("collaborators")
+        async for doc in collab_ref.stream():
+            batch.delete(doc.reference)
+        
+        # Xóa main document
+        batch.delete(ref)
+        
+        await batch.commit()
+        return True
 
     async def get_collection(self, collection_id: str) -> dict:
         """Lấy thông tin của một collection cụ thể."""
@@ -269,17 +284,9 @@ class CollectionRepository(BaseRepository):
         if not snapshot.exists:
             return {}
         
-        current_data = snapshot.to_dict() or {}
-        current_tags = current_data.get("tags", [])
-        
-        # Thêm tags mới, tránh duplicate
-        # TODO: ArrayUnion của Firestore có thể giúp tối ưu phần này
-        for tag in new_tags:
-            if tag not in current_tags:
-                current_tags.append(tag)
-        
+        # Dùng ArrayUnion để tránh duplicate tự động
         update_payload = {
-            "tags": current_tags,
+            "tags": fs.ArrayUnion(new_tags),
             "updated_at": datetime.now(timezone.utc)
         }
         
@@ -296,15 +303,9 @@ class CollectionRepository(BaseRepository):
         if not snapshot.exists:
             return {}
         
-        current_data = snapshot.to_dict() or {}
-        current_tags = current_data.get("tags", [])
-        
-        # Loại bỏ tags
-        # TODO: ArrayRemove của Firestore có thể giúp tối ưu phần này
-        remaining_tags = [t for t in current_tags if t not in tags_to_remove]
-        
+        # Dùng ArrayRemove để xóa tags
         update_payload = {
-            "tags": remaining_tags,
+            "tags": fs.ArrayRemove(tags_to_remove),
             "updated_at": datetime.now(timezone.utc)
         }
         

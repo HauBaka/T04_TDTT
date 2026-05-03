@@ -149,17 +149,16 @@ class HotelRepository(BaseRepository):
         if not property_tokens:
             return {}
         
-        hotels = {}
-        for token in property_tokens: # TODO: chạy song song + batch để tối ưu
-            try:
-                doc = await self._collection.document(token).get()
-                if doc.exists:
-                    hotels[token] = doc.to_dict()
-            except Exception as e:
-                logger.error(f"Error fetching hotel {token}: {str(e)}")
-        
+        try:
+            doc_refs = [self._collection.document(token) for token in property_tokens]
+            docs = await self._get_db().get_all(doc_refs)
+            hotels = {doc.id: doc.to_dict() for doc in docs if doc.exists}
+            
+        except Exception as e:
+            logger.error(f"Error fetching hotels: {str(e)}")
+            hotels = {}
         return hotels
-    
+
     async def get_places(self, place_ids: list[str]) -> list[dict]:
         """Lấy thông tin nhiều địa điểm (places) dựa trên place_ids."""
         if not place_ids:
