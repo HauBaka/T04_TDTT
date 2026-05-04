@@ -91,10 +91,16 @@ class CollectionService:
         if requester_id != owner_uid and requester_id not in collaborators_ids:
             raise AppException(status_code=403, message="You do not have permission to edit this collection.")
         
+        # Check place_ids có tồn tại không
+        existing = await hotel_repo.get_places(place_ids)
+        valid_ids: list[str] = [pid for pid in place_ids if pid in existing]
+        if not valid_ids:
+            raise NotFoundError("None of the provided place IDs are valid.")
+
         # Thêm vào collection (với lọc duplicate, check existence, lưu vào sub-collection)
         updated_collection = await collection_repo.add_places_to_collection(
             collection_id, 
-            place_ids, 
+            valid_ids, 
             requester_id,
             hotel_repo=hotel_repo
         )

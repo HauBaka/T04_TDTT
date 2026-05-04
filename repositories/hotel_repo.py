@@ -151,8 +151,8 @@ class HotelRepository(BaseRepository):
         
         try:
             doc_refs = [self._collection.document(token) for token in property_tokens]
-            docs = await self._get_db().get_all(doc_refs)
-            hotels = {doc.id: doc.to_dict() for doc in docs if doc.exists}
+            docs = [doc async for doc in self._get_db().get_all(doc_refs)]
+            hotels = {doc.id: doc.to_dict() or {} for doc in docs if doc.exists}
             
         except Exception as e:
             logger.error(f"Error fetching hotels: {str(e)}")

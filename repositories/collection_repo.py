@@ -55,24 +55,37 @@ class CollectionRepository(BaseRepository):
         collection_data["id"] = ref.id
         return collection_data
 
+    async def _delete_subcollection(self, sub_ref) -> None:
+        batch = self._get_db().batch()
+        count = 0
+
+        async for doc in sub_ref.stream():
+            batch.delete(doc.reference)
+            count += 1
+
+            if count == 500:
+                await batch.commit()
+                batch = self._get_db().batch()
+                count = 0
+
+        if count > 0:
+            await batch.commit()
+
     async def delete_collection(self, collection_id: str) -> bool:
         """Xóa một collection của người dùng."""
         ref = self._collection.document(collection_id)
-        batch = self._get_db().batch()
+        snapshot = await ref.get()
+        if not snapshot.exists:
+            return False
         
         # Xóa sub-collections trước 
-        places_ref = ref.collection("places")
-        async for doc in places_ref.stream():
-            batch.delete(doc.reference)
-        
-        collab_ref = ref.collection("collaborators")
-        async for doc in collab_ref.stream():
-            batch.delete(doc.reference)
-        
+        await self._delete_subcollection(ref.collection("places"))
+        await self._delete_subcollection(ref.collection("collaborators"))
         # Xóa main document
+        batch = self._get_db().batch()
         batch.delete(ref)
-        
         await batch.commit()
+
         return True
 
     async def get_collection(self, collection_id: str) -> dict:
@@ -124,15 +137,9 @@ class CollectionRepository(BaseRepository):
         new_place_ids = [pid for pid in place_ids if pid not in existing_place_ids]
         
         if not new_place_ids:
-            return snapshot.to_dict() or {}
-        
-        # Check xem places có tồn tại trong database không
-        if hotel_repo:
-            existing_hotels = await hotel_repo.get_hotels(new_place_ids)
-            new_place_ids = [pid for pid in new_place_ids if pid in existing_hotels]
-        
-        if not new_place_ids:
-            raise NotFoundError("None of the provided place IDs exist in the database.")
+            data = snapshot.to_dict() or {}
+            data["id"] = ref.id
+            return data
         
         # Lưu places vào sub-collection
         timestamp = datetime.now(timezone.utc)
