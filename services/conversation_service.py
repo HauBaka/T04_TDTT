@@ -1,6 +1,8 @@
 
 from datetime import datetime
 from fastapi import HTTPException
+from fastapi import BackgroundTasks
+
 
 from repositories.conversation_repo import conversation_repo
 from schemas.conversation_schema import ConversationResponse, ConversationCreateRequest, ConversationUpdateRequest, AddMembersRequest, SendMessageRequest, ConversationRole, ConversationMember
@@ -34,7 +36,7 @@ class ConversationService:
         await self.conversation_repository.upsert_user_conversation_summary(owner_uid, res["id"], summary)
         
         return ResponseSchema(data=ConversationResponse(**res))
-    
+
     async def get_conversation(self, conversation_id: str, requester_uid: str | None) -> ResponseSchema[ConversationResponse]:
         """Lấy thông tin một conversation theo ID."""
         # Lấy thông tin một conversation theo ID
@@ -43,7 +45,7 @@ class ConversationService:
             raise NotFoundError(message="Conversation not found")
         if requester_uid and requester_uid not in conv.get("member_uids", []):
             raise PermissionDeniedError(message="You do not have permission to access this conversation")
-
+        members_list = await self._get_members_list(conversation_id)
         return ResponseSchema(data=ConversationResponse(
                 id=conversation_id, 
                 owner_uid=conv["owner_uid"], 
@@ -52,10 +54,10 @@ class ConversationService:
                 thumbnail_url=conv.get("thumbnail_url"), 
                 created_at=conv["created_at"], 
                 updated_at=conv["updated_at"], 
-                members=conv.get("member_uids", [])) # TODO: sai kiểu dữ liệu, fetch sub-collection members để lấy
+                members= members_list) # fetch sub-collection members để lấy
             )
     
-    async def update_conversation(self, conversation_id: str, requester_uid: str, update_data: dict) -> ResponseSchema[ConversationResponse]:
+    async def update_conversation(self, conversation_id: str, requester_uid: str, update_data: dict, background_tasks: BackgroundTasks) -> ResponseSchema[ConversationResponse]:
         """Cập nhật thông tin một conversation."""
         conv = await self.conversation_repository.get_by_id(conversation_id)
         if not conv:
@@ -63,11 +65,15 @@ class ConversationService:
         if requester_uid and requester_uid not in conv.get("member_uids", []):
             raise PermissionDeniedError(message="You do not have permission to update this conversation")
         updated_res = await self.conversation_repository.update(conversation_id, update_data)
-        # Đồng bộ tên/ảnh mới cho tóm tắt hội thoại của tất cả thành viên
         
-        for uid in conv.get("member_uids", []): # TODO: chạy ngầm task này
-            await self.conversation_repository.upsert_user_conversation_summary(uid, conversation_id, update_data)
-
+        # Đồng bộ tên/ảnh mới cho tóm tắt hội thoại của tất cả thành viên
+        for uid in conv.get("member_uids", []): # chạy ngầm task này
+            # await self.conversation_repository.upsert_user_conversation_summary(uid, conversation_id, update_data)
+            background_tasks.add_task(
+                self.conversation_repository.upsert_user_conversation_summary, 
+                uid, conversation_id, update_data
+            )
+        members_list = await self._get_members_list(conversation_id)
         return ResponseSchema(data=ConversationResponse(
                 id=conversation_id, 
                 owner_uid=conv["owner_uid"], 
@@ -76,10 +82,10 @@ class ConversationService:
                 thumbnail_url=update_data.get("thumbnail_url", conv.get("thumbnail_url")), 
                 created_at=conv["created_at"], 
                 updated_at=datetime.now(), 
-                members=conv.get("member_uids", [])) # TODO: sai kiểu dữ liệu, fetch sub-collection members để lấy
+                members= members_list) # fetch sub-collection members để lấy
             )
     
-    async def delete_conversation(self, conversation_id: str, requester_uid: str) -> ResponseSchema[bool]:
+    async def delete_conversation(self, conversation_id: str, requester_uid: str, background_tasks: BackgroundTasks) -> ResponseSchema[bool]:
         """Xóa một conversation."""
         conv = await self.conversation_repository.get_by_id(conversation_id)
         if not conv:
@@ -88,15 +94,18 @@ class ConversationService:
             raise PermissionDeniedError(message="Only the owner can delete this conversation")
 
         member_uids = conv.get("member_uids", [])
-        for uid in member_uids: # TODO: chạy ngầm task này
+        for uid in member_uids: # chạy ngầm task này
             # Gọi hàm xóa sub-collection conversations của từng User
-            await self.conversation_repository.remove_user_conversation_summary(uid, conversation_id)
-            
+            # await self.conversation_repository.remove_user_conversation_summary(uid, conversation_id)
+            background_tasks.add_task(
+                self.conversation_repository.remove_user_conversation_summary, uid, conversation_id
+            )
+
         # Thực hiện xóa đoạn chat gốc trong collection 'conversations'
         await self.conversation_repository.delete(conversation_id)
         return ResponseSchema(data=True)
     
-    async def add_members_to_conversation(self, conversation_id: str, requester_uid: str, request: AddMembersRequest) -> ResponseSchema[ConversationResponse]:
+    async def add_members_to_conversation(self, conversation_id: str, requester_uid: str, request: AddMembersRequest, background_tasks: BackgroundTasks) -> ResponseSchema[ConversationResponse]:
         """Thêm nhiều thành viên vào một conversation."""
         """Xóa một conversation."""
         conv = await self.conversation_repository.get_by_id(conversation_id)
@@ -109,6 +118,7 @@ class ConversationService:
         updated_conv = await self.conversation_repository.add_members(conversation_id, request.member_uids)
         if not updated_conv:
             raise AppException(message="Failed to update conversation", status_code=500)
+        
         # Tạo tóm tắt hội thoại cho những thành viên mới này
         summary = {
             "id": conversation_id,
@@ -116,8 +126,14 @@ class ConversationService:
             "unread_count": 0,
             "updated_at": datetime.now()
         }
-        for uid in request.member_uids: # TODO: chạy ngầm task này
-            await self.conversation_repository.upsert_user_conversation_summary(uid, conversation_id, summary)
+        for uid in request.member_uids: # chạy ngầm task này
+            # await self.conversation_repository.upsert_user_conversation_summary(uid, conversation_id, summary)
+            background_tasks.add_task(
+                self.conversation_repository.upsert_user_conversation_summary, 
+                uid, conversation_id, summary
+            )
+        
+        members_list = await self._get_members_list(conversation_id)
         return ResponseSchema(data=ConversationResponse(
                 id=conversation_id, 
                 owner_uid=updated_conv["owner_uid"], 
@@ -126,7 +142,7 @@ class ConversationService:
                 thumbnail_url=updated_conv.get("thumbnail_url"), 
                 created_at=updated_conv["created_at"], 
                 updated_at=datetime.now(), 
-                members=updated_conv.get("member_uids", [])) # TODO: sai kiểu dữ liệu, fetch sub-collection members để lấy
+                members= members_list) # fetch sub-collection members để lấy
             )
     
     async def remove_members_from_conversation(self, conversation_id: str, requester_uid: str, target_uids: list[str]) -> ResponseSchema[ConversationResponse]:
@@ -145,6 +161,8 @@ class ConversationService:
         # Xóa tóm tắt hội thoại của những người bị xóa
         for uid in target_uids:
             await self.conversation_repository.remove_user_conversation_summary(uid, conversation_id)
+        
+        members_list = await self._get_members_list(conversation_id)
         return ResponseSchema(data=ConversationResponse(
                 id=conversation_id, 
                 owner_uid=updated_conv["owner_uid"], 
@@ -153,10 +171,10 @@ class ConversationService:
                 thumbnail_url=updated_conv.get("thumbnail_url"), 
                 created_at=updated_conv["created_at"], 
                 updated_at=datetime.now(), 
-                members=updated_conv.get("member_uids", [])) # TODO: sai kiểu dữ liệu, fetch sub-collection members để lấy
+                members=members_list) # fetch sub-collection members để lấy
             )
     
-    async def send_message_to_conversation(self, conversation_id: str, requester_uid: str, message_data: SendMessageRequest) -> ResponseSchema[ConversationResponse]:
+    async def send_message_to_conversation(self, conversation_id: str, requester_uid: str, message_data: SendMessageRequest, background_tasks: BackgroundTasks) -> ResponseSchema[ConversationResponse]:
         """Gửi một tin nhắn mới vào một conversation."""
         """Cập nhật số tin nhắn chưa đọc của các thành viên khác trong nhóm."""
         conv = await self.conversation_repository.get_by_id(conversation_id)
@@ -186,15 +204,28 @@ class ConversationService:
         }
 
         # Vòng lặp cập nhật tóm tắt hội thoại cho TẤT CẢ mọi người trong nhóm
-        for uid in member_uids: # TODO: chạy ngầm task này
-            await self.conversation_repository.upsert_user_conversation_summary(uid, conversation_id, {
-                "latest_msg": last_msg_summary,
+        for uid in member_uids: # chạy ngầm task này
+            # await self.conversation_repository.upsert_user_conversation_summary(uid, conversation_id, {
+            #     "latest_msg": last_msg_summary,
+            #     "updated_at": datetime.now()
+            # })
+            summary_update = {
+                "latest_msg": saved_msg,
                 "updated_at": datetime.now()
-            })
-            
+            }
+            background_tasks.add_task(
+                self.conversation_repository.upsert_user_conversation_summary,
+                uid, conversation_id, summary_update
+            )
             # Nếu người trong vòng lặp không phải là người gửi, tăng số tin chưa đọc lên 1
             if uid != requester_uid:
-                await self.conversation_repository.increment_user_unread_count(uid, conversation_id)
+                #await self.conversation_repository.increment_user_unread_count(uid, conversation_id)
+                background_tasks.add_task(
+                    self.conversation_repository.increment_user_unread_count,
+                    uid, conversation_id
+                )
+        
+        members_list = await self._get_members_list(conversation_id)
         return ResponseSchema(data=ConversationResponse(
                 id=conversation_id, 
                 owner_uid=conv["owner_uid"], 
@@ -203,7 +234,7 @@ class ConversationService:
                 thumbnail_url=conv.get("thumbnail_url"), 
                 created_at=conv["created_at"], 
                 updated_at=datetime.now(), 
-                members=conv.get("member_uids", [])) # TODO: sai kiểu dữ liệu, fetch sub-collection members để lấy
+                members=members_list) # fetch sub-collection members để lấy
             )
 
     async def delete_message_from_conversation(self, conversation_id: str, message_id: str, requester_uid: str) -> ResponseSchema[ConversationResponse]:
@@ -220,6 +251,8 @@ class ConversationService:
         if msg.get("sender_uid") != requester_uid and conv.get("owner_uid") != requester_uid:
             raise PermissionDeniedError(message="You do not have permission to delete this message")
         await self.conversation_repository.delete_message(conversation_id, message_id)
+        
+        members_list = await self._get_members_list(conversation_id)
         return ResponseSchema(data=ConversationResponse(
                 id=conversation_id, 
                 owner_uid=conv["owner_uid"], 
@@ -228,7 +261,7 @@ class ConversationService:
                 thumbnail_url=conv.get("thumbnail_url"), 
                 created_at=conv["created_at"], 
                 updated_at=datetime.now(), 
-                members=conv.get("member_uids", [])) # TODO: sai kiểu dữ liệu, fetch sub-collection members để lấy
+                members=members_list) # fetch sub-collection members để lấy
             )
     
     async def get_or_create_default_chatbot_conversation(self, uid: str) -> ResponseSchema[ConversationResponse]:
@@ -253,6 +286,7 @@ class ConversationService:
             if not conv:
                 raise AppException(message="Failed to create default chatbot conversation", status_code=500)
             
+        members_list = await self._get_members_list(f"chatbot_conv_{uid}")
         return ResponseSchema(data=ConversationResponse(
             id = f"chatbot_conv_{uid}",
             owner_uid = uid,
@@ -260,7 +294,7 @@ class ConversationService:
             description = "Default chatbot conversation",
             created_at = conv["created_at"],
             updated_at = conv["updated_at"],
-            members = conv["members"]) # TODO: có thể sai kiểu dữ liệu, check lại
+            members = members_list) 
         )
     
     async def get_recent_messages(self, conversation_id: str, limit: int = 20) -> ResponseSchema[list]:
@@ -277,6 +311,11 @@ class ConversationService:
         await self.conversation_repository.reset_user_unread_count(requester_uid, conversation_id)
         return ResponseSchema(data=True)
     
+    async def _get_members_list(self, conversation_id: str) -> list[ConversationMember]:
+        """Lấy sub-collection members và map sang Object Schema."""
+        # Gọi hàm get_members trong Repo
+        docs = await self.conversation_repository.get_members(conversation_id)
+        return [ConversationMember(**doc.to_dict()) for doc in docs]
 
 
 conversation_service = ConversationService()

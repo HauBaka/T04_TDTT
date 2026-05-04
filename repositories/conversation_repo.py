@@ -81,12 +81,30 @@ class ConversationRepository(BaseRepository):
         except Exception:
             return False
 
+    async def _delete_subcollection(self, collection_ref, batch_size: int = 100):
+        """Hàm đệ quy xóa các document trong sub-collection."""
+        docs = collection_ref.limit(batch_size).stream() #Lấy ra danh sách các doc nhưng có giới hạn
+        deleted = 0
+        async for doc in docs:
+            await doc.reference.delete()
+            deleted += 1
+        if deleted >= batch_size: #Nếu True nghĩa là có khả năng vẫn còn doc
+            await self._delete_subcollection(collection_ref, batch_size)
+
     async def delete(self, conversation_id: str) -> bool:
         """Xóa một conversation."""
         """Xóa hoàn toàn hội thoại."""
-        # TODO: Xóa sub-collection members và messages trước khi xóa doc chính
-        await self._collection.document(conversation_id).delete()
-        return True
+        # Xóa sub-collection members và messages trước khi xóa doc chính
+        try:
+            conv_ref = self._collection.document(conversation_id)
+            # Xóa tin nhắn và thành viên trước
+            await self._delete_subcollection(conv_ref.collection("messages"))
+            await self._delete_subcollection(conv_ref.collection("members"))
+            # Xóa doc chính
+            await conv_ref.delete()
+            return True
+        except Exception:
+            return False
     
     async def get_recent_messages(self, conversation_id: str, limit: int = 20) -> list[dict]:
         """Lấy một số tin nhắn gần đây nhất của một conversation."""
@@ -99,6 +117,10 @@ class ConversationRepository(BaseRepository):
         doc = await self._get_db().collection("conversations").document(conversation_id)\
                     .collection("messages").document(message_id).get()
         return doc.to_dict() if doc.exists else None
+    
+    async def get_members(self, conversation_id: str):
+        members_ref = self._collection.document(conversation_id).collection("members")
+        return await members_ref.get()
 # --- CÁC HÀM XỬ LÝ SUB-COLLECTION CỦA USER --- (có thể sử dụng đến)
 
     async def upsert_user_conversation_summary(self, uid: str, conversation_id: str, summary_data: dict):
