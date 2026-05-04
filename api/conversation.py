@@ -28,13 +28,14 @@ async def delete_conversation(conversation_id: str, background_tasks: Background
 
 # --- QUẢN LÝ THÀNH VIÊN (MEMBERS) ---
 @conversation_router.post("/conversations/{conversation_id}/members", response_model=ResponseSchema[ConversationResponse])
-async def add_members_to_conversation(conversation_id: str, member: AddMembersRequest, background_tasks: BackgroundTasks, requester=Depends(get_current_user(optional=False))):
+async def add_members_to_conversation(conversation_id: str, members: AddMembersRequest, background_tasks: BackgroundTasks, requester=Depends(get_current_user(optional=False))):
     """Thêm nhiều thành viên vào một conversation."""
-    return await conversation_service.add_members_to_conversation(conversation_id, requester.get("uid"), member, background_tasks=background_tasks)
+    return await conversation_service.add_members_to_conversation(conversation_id, requester.get("uid"), members, background_tasks=background_tasks)
 
 @conversation_router.delete("/conversations/{conversation_id}/members", response_model=ResponseSchema[ConversationResponse])
 async def remove_members_from_conversation(conversation_id: str, target_uid: str, requester=Depends(get_current_user(optional=False))):
     """Xóa nhiều thành viên khỏi một conversation."""
+    # TODO: Chuyển sang danh sách uid để xóa nhiều thành viên cùng lúc
     return await conversation_service.remove_members_from_conversation(conversation_id, requester.get("uid"), [target_uid])
 
 # --- QUẢN LÝ TIN NHẮN (MESSAGES) & UNREAD STATUS ---

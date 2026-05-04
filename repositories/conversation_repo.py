@@ -1,5 +1,5 @@
 from repositories.base_repo import BaseRepository
-from datetime import datetime
+from datetime import datetime, timezone
 from google.cloud import firestore
 
 class ConversationRepository(BaseRepository):
@@ -22,6 +22,7 @@ class ConversationRepository(BaseRepository):
     async def update(self, conversation_id: str, update_data: dict) -> dict | None:
         """Cập nhật thông tin một conversation."""
         doc_ref = self._collection.document(conversation_id)
+        update_data["updated_at"] = datetime.now(timezone.utc)
         await doc_ref.update(update_data)
         res = await doc_ref.get()
         return res.to_dict()
@@ -37,7 +38,7 @@ class ConversationRepository(BaseRepository):
         for uid in member_uids:
             member_detail = {
                 "uid": uid,
-                "joined_at": datetime.now(),
+                "joined_at": datetime.now(timezone.utc),
                 "role": "member"
             }
             
@@ -81,15 +82,15 @@ class ConversationRepository(BaseRepository):
         except Exception:
             return False
 
-    async def _delete_subcollection(self, collection_ref, batch_size: int = 100):
-        """Hàm đệ quy xóa các document trong sub-collection."""
-        docs = collection_ref.limit(batch_size).stream() #Lấy ra danh sách các doc nhưng có giới hạn
-        deleted = 0
-        async for doc in docs:
-            await doc.reference.delete()
-            deleted += 1
-        if deleted >= batch_size: #Nếu True nghĩa là có khả năng vẫn còn doc
-            await self._delete_subcollection(collection_ref, batch_size)
+    # async def _delete_subcollection(self, collection_ref, batch_size: int = 100):
+    #     """Hàm đệ quy xóa các document trong sub-collection."""
+    #     docs = collection_ref.limit(batch_size).stream() #Lấy ra danh sách các doc nhưng có giới hạn
+    #     deleted = 0
+    #     async for doc in docs:
+    #         await doc.reference.delete()
+    #         deleted += 1
+    #     if deleted >= batch_size: #Nếu True nghĩa là có khả năng vẫn còn doc
+    #         await self._delete_subcollection(collection_ref, batch_size)
 
     async def delete(self, conversation_id: str) -> bool:
         """Xóa một conversation."""
@@ -118,9 +119,10 @@ class ConversationRepository(BaseRepository):
                     .collection("messages").document(message_id).get()
         return doc.to_dict() if doc.exists else None
     
-    async def get_members(self, conversation_id: str):
+    async def get_members(self, conversation_id: str) -> list[dict]:
         members_ref = self._collection.document(conversation_id).collection("members")
-        return await members_ref.get()
+        members = await members_ref.get()
+        return [member.to_dict() for member in members]
 # --- CÁC HÀM XỬ LÝ SUB-COLLECTION CỦA USER --- (có thể sử dụng đến)
 
     async def upsert_user_conversation_summary(self, uid: str, conversation_id: str, summary_data: dict):
