@@ -21,7 +21,6 @@ class TripRepository(BaseRepository):
     })
         trip_id = await self._create(payload)
         return await self._get_by_id(trip_id)
-        
     
     async def get_by_id(self, trip_id: str) -> dict | None:
         """Lấy thông tin một trip theo ID."""
@@ -99,7 +98,7 @@ class TripRepository(BaseRepository):
         members_ref = db.collection("trips").document(trip_id).collection("members")
         valid_uids = []
         for uid, update_data in updates_data.items():
-            payload = {k: v for k, v in update_data.items() if v is not None}
+            payload = update_data.copy()
             
             if payload:
                 ref = members_ref.document(uid)
@@ -109,7 +108,7 @@ class TripRepository(BaseRepository):
             return []
         await batch.commit()
         updated_members = []
-        for uid in valid_uids:
+        for uid in valid_uids: # TODO: chạy ngầm (song song) để tăng tốc độ
             doc = await members_ref.document(uid).get()
             if doc.exists:
                 member_data = doc.to_dict()
@@ -118,7 +117,7 @@ class TripRepository(BaseRepository):
         return updated_members
     
     async def get_members(self, trip_id: str) -> list[dict]:
-        "lấy danh sách member từ collection"
+        "lấy danh sách member từ sub-collection"
         if not trip_id:
             return []
         db = self._get_db()
@@ -134,6 +133,7 @@ class TripRepository(BaseRepository):
     
     async def delete(self, trip_id: str) -> bool:
         """Xóa một trip."""
+        # TODO: Cần xóa cả subcollections trước khi xóa trip
         return await self._delete(trip_id)
     
 trip_repo = TripRepository()
