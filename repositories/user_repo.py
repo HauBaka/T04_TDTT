@@ -54,5 +54,32 @@ class UserRepository(BaseRepository):
         for doc in docs:
             return doc.to_dict()
         return None
-
+    async def batch_update_current_trip(self, uids: list[str], trip_id: str | None) -> bool:
+        """
+        Cập nhật field current_trip cho nhiều user cùng lúc bằng Batch Write.
+        """
+        if not uids:
+            return True
+            
+        db = get_db()  # Lấy instance db để khởi tạo batch
+        unique_uids = list(set(uids))
+        
+        # Firestore giới hạn 500 thao tác mỗi batch
+        chunk_size = 500 
+        
+        try:
+            for i in range(0, len(unique_uids), chunk_size):
+                chunk = unique_uids[i:i + chunk_size]
+                batch = db.batch()
+                
+                for uid in chunk:
+                    user_ref = self._collection.document(uid)
+                    batch.update(user_ref, {"current_trip": trip_id})
+                    
+                await batch.commit()
+                
+            return True
+        except Exception as e:
+            print(f"Error in batch_update_current_trip: {e}")
+            return False
 user_repo = UserRepository()

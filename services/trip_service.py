@@ -19,6 +19,9 @@ class TripService:
         if not creator_info:
             raise NotFoundError("Creator user not found.")
         
+        if creator_info.get("current_trip"):
+            raise AppException(status_code=400, message="You are already in an active trip.")
+        
         # Tạo trip mới
         new_trip = await self.trip_repo.create(creator_uid, trip_data.model_dump())
         if not new_trip:
@@ -33,6 +36,8 @@ class TripService:
             "role": "owner"
         }
         updated_trip = await self.trip_repo.add_members(trip_id, member_data)
+        
+        await self.user_repo.update_user(creator_uid, {"current_trip": trip_id})
         
         return ResponseSchema(
             message="Trip created successfully",
@@ -72,7 +77,13 @@ class TripService:
         
         if not updated_trip:
             raise AppException(status_code=500, message="Failed to update trip.")
-        
+        #xử lý endtrip
+        new_status = update_payload.get("status")
+        if new_status == TripStatus.ENDED.value or new_status == TripStatus.ENDED:
+            member_uids = updated_trip.get("member_uids", [])
+            if member_uids:
+                await self.user_repo.batch_update_current_trip(member_uids, None)
+                
         return ResponseSchema(data=TripResponse(**updated_trip))
     
     async def delete_trip(self, trip_id: str, requester_uid: str) -> ResponseSchema[bool]:
@@ -86,7 +97,10 @@ class TripService:
         success = await self.trip_repo.delete(trip_id)
         if not success:
             raise AppException(status_code=500, message="Failed to delete trip.")
-        
+        member_uids = trip.get("member_uids", [])
+        if member_uids:
+            await self.user_repo.batch_update_current_trip(member_uids, None)
+            
         return ResponseSchema(message="Trip deleted successfully", data=success)
     
     async def add_members_to_trip(self, trip_id: str, requester_uid: str, member_uids: list[str]) -> ResponseSchema[TripResponse]:
@@ -109,7 +123,10 @@ class TripService:
             user_info = users_info.get(uid)
             if not user_info:
                 raise NotFoundError(f"User {uid} not found in system.")
-                
+            #kiểm tra đảm bảo các user chuẩn bị thêm chưa tham gia trip nào khác
+            if user_info.get("current_trip"):
+                display_name = user_info.get("display_name", uid)
+                raise AppException(status_code=400, message=f"User {display_name} is already in another active trip.")   
             members_data_to_add[uid] = {
                 "display_name": user_info.get("display_name", "Unknown"),
                 "avatar_url": user_info.get("avatar_url"),
@@ -119,6 +136,8 @@ class TripService:
         
         if not updated_trip:
             raise AppException(status_code=500, message="Failed to add members to trip.")
+        #Update: current_trip = trip_id cho các new member
+        await self.user_repo.batch_update_current_trip(new_member_uids, trip_id)
         
         return ResponseSchema(data=TripResponse(**updated_trip))
     async def remove_members_from_trip(self, trip_id: str, requester_uid: str, target_uids: list[str]) -> ResponseSchema[TripResponse]:
@@ -158,7 +177,7 @@ class TripService:
         
         if not updated_trip:
             raise AppException(status_code=500, message="Failed to remove members from trip.")
-        
+        await self.user_repo.batch_update_current_trip(target_uids, None)
         return ResponseSchema(data=TripResponse(**updated_trip))
     
 trip_service = TripService()
