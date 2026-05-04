@@ -146,9 +146,6 @@ class TripService:
     
     async def remove_members_from_trip(self, trip_id: str, requester_uid: str, target_uids: list[str]) -> ResponseSchema[TripResponse]:
         """Xóa nhiều thành viên khỏi một trip."""
-        if not target_uids:
-            raise AppException(status_code=400, message="Target member list cannot be empty.")
-        
         trip = await self.trip_repo.get_by_id(trip_id)
         if not trip:
             raise NotFoundError("Trip not found.")

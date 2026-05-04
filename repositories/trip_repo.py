@@ -24,7 +24,12 @@ class TripRepository(BaseRepository):
     
     async def get_by_id(self, trip_id: str) -> dict | None:
         """Lấy thông tin một trip theo ID."""
-        return await self._get_by_id(trip_id)
+        trip_data = await self._get_by_id(trip_id)
+        if not trip_data:
+            return None
+        members_detail = await self.get_members(trip_id)    
+        trip_data["members"] = members_detail
+        return trip_data
     
     async def update(self, trip_id: str, update_data: dict) -> dict | None:
         """Cập nhật thông tin một trip."""
