@@ -81,11 +81,11 @@ class UserRepository(BaseRepository):
                 for uid in chunk:
                     user_ref = self._collection.document(uid)
                     batch.update(user_ref, {"current_trip": trip_id})
-                    
                 await batch.commit()
                 
             return True
         except Exception as e:
             print(f"Error in batch_update_current_trip: {e}")
             return False
+        
 user_repo = UserRepository()

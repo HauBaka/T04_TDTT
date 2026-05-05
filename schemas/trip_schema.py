@@ -21,11 +21,15 @@ class TripMemberTracking(BaseModel):
     Lưu tại: trips/{trip_id}/members/{uid}
     """
     uid: str
-    lat: float
-    lng: float
+    lat: float | None = None
+    lng: float | None = None
     updated_at: datetime
     status: MemberTrackingStatus = MemberTrackingStatus.NO_SHARE
-    
+
+class TripMemberInfo(BaseModel):
+    uid: str
+    joined_at: datetime
+
 class TripCreateRequest(BaseModel):
     name: str = Field(..., min_length=3, max_length=50)
     place_id: str = Field(..., description="ID địa điểm đích đến")
@@ -37,7 +41,7 @@ class TripAddMembersRequest(BaseModel):
     
 class TripRemoveMembersRequest(BaseModel):
     """Schema dùng cho API xóa thành viên"""
-    target_uids: list[str] = Field(..., min_length=1, description="Danh sách UID thành viên muốn xóa. Không được để rỗng.")
+    member_uids: list[str] = Field(..., min_length=1, description="Danh sách UID thành viên muốn xóa. Không được để rỗng.")
     
 class TripUpdateRequest(BaseModel):
     """Chỉ owner mới được gọi và chỉ khi status là WAITING"""
@@ -56,6 +60,6 @@ class TripResponse(BaseModel):
     end_at: datetime
     status: TripStatus = TripStatus.WAITING
     
-    member_uids: list[str] = Field(default_factory=list)
+    members: list[TripMemberInfo] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime

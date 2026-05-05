@@ -1,26 +1,25 @@
 import asyncio
 from datetime import datetime, timezone
-from google.cloud import firestore as fs
-from schemas.response_schema import ResponseSchema
 from repositories.base_repo import BaseRepository
 from schemas.trip_schema import TripStatus
 class TripRepository(BaseRepository):
     def __init__(self):
         super().__init__("trips")
 
-    async def create(self,uid: str, trip_data: dict) -> dict | None:
+    async def create(self, uid: str, trip_data: dict) -> dict | None:
         """Tạo một trip mới."""
         now = datetime.now(timezone.utc)
         payload = trip_data.copy()
         
         payload.update({
-        "owner_uid": uid,
-        "created_at": now,
-        "updated_at": now,
-        "status": TripStatus.WAITING.value,
-        "member_uids": [uid]
-    })
+            "owner_uid": uid,
+            "created_at": now,
+            "updated_at": now,
+            "status": TripStatus.WAITING.value
+        })
+
         trip_id = await self._create(payload)
+
         return await self._get_by_id(trip_id)
     
     async def get_by_id(self, trip_id: str) -> dict | None:
@@ -28,8 +27,10 @@ class TripRepository(BaseRepository):
         trip_data = await self._get_by_id(trip_id)
         if not trip_data:
             return None
+        
         members_detail = await self.get_members(trip_id)    
         trip_data["members"] = members_detail
+
         return trip_data
     
     async def update(self, trip_id: str, update_data: dict) -> dict | None:
@@ -38,16 +39,18 @@ class TripRepository(BaseRepository):
         
         if not payload:
             return await self.get_by_id(trip_id)
+        
         payload["updated_at"] = datetime.now(timezone.utc)
         if "status" in payload and hasattr(payload["status"],"value"):
             payload["status"] = payload["status"].value
+
         #sd hàm base
         await self._update(trip_id, payload)
         return await self.get_by_id(trip_id)
     
-    async def add_members(self, trip_id: str, members_data: dict[str, dict]) -> dict | None:
+    async def add_members(self, trip_id: str, members_data: list[str]) -> dict | None:
         """Thêm member:
-        1. Cập nhật UID vào mảng member_uids ở document_trip.
+        BỎ: 1. Cập nhật UID vào mảng member_uids ở document_trip.
         2. Tạo document chứa thông tin chi tiết trong subcollection"""
         if not members_data:
             return await self.get_by_id(trip_id)
@@ -55,26 +58,22 @@ class TripRepository(BaseRepository):
         db = self._get_db()
         batch = db.batch()
         now = datetime.now(timezone.utc)
-        uids = list(members_data.keys())
 
         trip_ref = db.collection("trips").document(trip_id)
         batch.update(trip_ref, {
-            "member_uids": fs.ArrayUnion(uids),
             "updated_at": now
         })
-        for uid, info in members_data.items():
+
+        for uid in members_data:
             member_ref = trip_ref.collection("members").document(uid)
-            member_payload = info.copy()
-            member_payload.update({"uid": uid, "joined_at": now})
-            batch.set(member_ref, member_payload)
+            batch.set(member_ref, {"uid": uid, "joined_at": now})
+
         await batch.commit()
-        
         return await self.get_by_id(trip_id)
-        
         
     async def remove_members(self, trip_id: str, uids: list[str]) -> dict | None:
         """Xóa member:
-        1. Xóa uid khỏi mảng 'member_uids' ở document trip
+        Bỏ: 1. Xóa uid khỏi mảng 'member_uids' ở document trip
         2. Xóa document của member đó khỏi subcollection"""
         if not uids:
             return await self.get_by_id(trip_id)
@@ -83,9 +82,9 @@ class TripRepository(BaseRepository):
         batch = db.batch()
         trip_ref = db.collection("trips").document(trip_id)
         batch.update(trip_ref, {
-            "member_uids": fs.ArrayRemove(uids),
             "updated_at": datetime.now(timezone.utc)
         })
+
         for uid in uids:
             member_ref = trip_ref.collection("members").document(uid)
             batch.delete(member_ref)
@@ -94,7 +93,7 @@ class TripRepository(BaseRepository):
 
         return await self.get_by_id(trip_id)       
         
-    async def update_members(self,trip_id: str,updates_data: dict[str,dict]) -> list[dict]:
+    async def update_members(self, trip_id: str, updates_data: dict[str,dict]) -> list[dict]:
         """cập nhật thông tin của nhiều member trong collection"""
         if not trip_id or not updates_data:
             return []
@@ -107,23 +106,25 @@ class TripRepository(BaseRepository):
             payload = update_data.copy()
             
             if payload:
-                ref = members_ref.document(uid)
-                batch.set(ref, payload, merge=True) 
+                batch.set(members_ref.document(uid), payload, merge=True) 
                 valid_uids.append(uid)
+
         if not valid_uids:
             return []
+        
         await batch.commit()
         
         tasks = [members_ref.document(uid).get() for uid in valid_uids]
         docs = await asyncio.gather(*tasks)
         
         updated_members = []
-        for uid in valid_uids: 
-            doc = await members_ref.document(uid).get()
+
+        for doc in docs:
             if doc.exists:
                 member_data = doc.to_dict()
                 member_data["uid"] = doc.id
                 updated_members.append(member_data)
+
         return updated_members
     
     async def get_members(self, trip_id: str) -> list[dict]:

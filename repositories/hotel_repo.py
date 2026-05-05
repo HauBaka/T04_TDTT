@@ -144,4 +144,15 @@ class HotelRepository(BaseRepository):
 
         return hotels
 
+    async def valid_ids(self, place_ids: list[str]) -> list[str]:
+        """Kiểm tra xem tất cả place_ids có tồn tại trong database hay không."""
+        return [
+            doc.id
+            async for doc in self._get_db().get_all(
+                [self._collection.document(pid) for pid in place_ids]
+            )
+            if doc.exists
+        ]
+
+
 hotel_repo = HotelRepository()
