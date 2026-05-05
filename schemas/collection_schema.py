@@ -74,6 +74,7 @@ class CollectionUpdateRequest(BaseModel):
     # places: list[Modification] | None = None
     # tags: list[Modification] | None = None
     visibility: CollectionVisibility | None = None
+    thumbnail_url: str | None = None
 
 class AddMultiplePlacesRequest(BaseModel):
     place_ids: list[str] = Field(..., min_length=1, max_length=50)

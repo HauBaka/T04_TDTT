@@ -153,7 +153,6 @@ class HotelRepository(BaseRepository):
             doc_refs = [self._collection.document(token) for token in property_tokens]
             docs = [doc async for doc in self._get_db().get_all(doc_refs)]
             hotels = {doc.id: doc.to_dict() or {} for doc in docs if doc.exists}
-            
         except Exception as e:
             logger.error(f"Error fetching hotels: {str(e)}")
             hotels = {}
@@ -174,5 +173,15 @@ class HotelRepository(BaseRepository):
                 places.append(place_info)
         
         return places
+
+    async def valid_ids(self, place_ids: list[str]) -> list[str]:
+        """Kiểm tra xem tất cả place_ids có tồn tại trong database hay không."""
+        return [
+            doc.id
+            async for doc in self._get_db().get_all(
+                [self._collection.document(pid) for pid in place_ids]
+            )
+            if doc.exists
+        ]
 
 hotel_repo = HotelRepository()

@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from weakref import ref
 from google.cloud import firestore as fs
 from loguru import logger
 
@@ -21,12 +22,9 @@ class CollectionRepository(BaseRepository):
             "created_at": timestamp,
             "updated_at": timestamp,
             "liked_count": 0,
-            "contributor_count": 0,
+            "collaborators_count": 0,
             "place_count": 0,
-            "collaborators": [],
-            "places": [],
             "tags": data.get("tags") or [],
-            "liked": [],
         })
 
         ref_id = await self._create(data)
@@ -122,7 +120,7 @@ class CollectionRepository(BaseRepository):
             logger.error(f"Error getting collaborators from subcollection for collection {collection_id}: {str(e)}")
             return {}
 
-    async def add_places_to_collection(self, collection_id: str, place_ids: list[str], requester_id: str, hotel_repo=None) -> dict:
+    async def add_places_to_collection(self, collection_id: str, place_ids: list[str], requester_id: str) -> dict:
         """Thêm nhiều địa điểm vào collection với lọc duplicate và check existence."""
         ref = self._collection.document(collection_id)
         snapshot = await ref.get()
@@ -130,11 +128,13 @@ class CollectionRepository(BaseRepository):
             return {}
         
         # Lấy places hiện có
-        existing_places = await self._get_places_from_subcollection(collection_id)
-        existing_place_ids = set(existing_places.keys())
-        
+        places_collection = ref.collection("places")
+        docs = self._get_db().get_all(
+            [places_collection.document(pid) for pid in place_ids]
+        )
+        existing_docs = {doc.id async for doc in docs if doc.exists}
         # Lọc những place bị trùng lặp
-        new_place_ids = [pid for pid in place_ids if pid not in existing_place_ids]
+        new_place_ids = [pid for pid in place_ids if pid not in existing_docs]
         
         if not new_place_ids:
             data = snapshot.to_dict() or {}
@@ -154,10 +154,14 @@ class CollectionRepository(BaseRepository):
                 "added_by": requester_id
             })
         
+        # Update contributed_count của cộng tác viên
+        collab_ref = ref.collection("collaborators").document(requester_id)
+        batch.update(collab_ref, {
+            "contributed_count": fs.Increment(len(new_place_ids))
+        })
+
         # Update place_count trên main document
-        total_places = len(existing_place_ids) + len(new_place_ids)
         batch.update(ref, {
-            "place_count": total_places,
             "updated_at": timestamp
         })
         
@@ -176,23 +180,40 @@ class CollectionRepository(BaseRepository):
         if not snapshot.exists:
             return {}
         
+        batch = self._get_db().batch()
+        places_collection = ref.collection("places")
         # Lấy places hiện có
-        existing_places = await self._get_places_from_subcollection(collection_id)
+        docs_gen = self._get_db().get_all(
+            [places_collection.document(pid) for pid in place_ids]
+        )
+
+        docs = [doc async for doc in docs_gen]
+        existing_docs = {doc.id for doc in docs if doc.exists}
+        if not existing_docs:
+            data = snapshot.to_dict() or {}
+            data["id"] = ref.id
+            return data
         
         # Xóa những places được chỉ định
         timestamp = datetime.now(timezone.utc)
-        batch = self._get_db().batch()
-        places_collection = ref.collection("places")
         
-        for place_id in place_ids:
-            if place_id in existing_places:
-                place_ref = places_collection.document(place_id)
-                batch.delete(place_ref)
+        for place_id in existing_docs:
+            batch.delete(places_collection.document(place_id))
         
+        # Update contributed_count của người đã thêm place
+        for doc in docs:
+            if doc.exists and doc.id in existing_docs:
+                place_data = doc.to_dict() or {}
+                added_by = place_data.get("added_by")
+                if added_by:
+                    collab_ref = ref.collection("collaborators").document(added_by)
+                    batch.update(collab_ref, {
+                        "contributed_count": fs.Increment(-1)
+                    })
+
+
         # Update place_count trên main document
-        remaining_count = len(existing_places) - sum(1 for pid in place_ids if pid in existing_places)
         batch.update(ref, {
-            "place_count": max(0, remaining_count),
             "updated_at": timestamp
         })
         
@@ -211,22 +232,13 @@ class CollectionRepository(BaseRepository):
         if not snapshot.exists:
             return {}
         
-        # Lấy collaborators hiện có
-        existing_collaborators = await self._get_collaborators_from_subcollection(collection_id)
-        existing_uids = set(existing_collaborators.keys())
-        
-        # Lọc những uid bị trùng lặp
-        new_uids = [uid for uid in collaborator_uids if uid not in existing_uids]
-        
-        if not new_uids:
-            return snapshot.to_dict() or {}
         
         # Lưu collaborators vào sub-collection với structure: {uid: {contributed_count, joined_at}}
         timestamp = datetime.now(timezone.utc)
         batch = self._get_db().batch()
         collab_collection = ref.collection("collaborators")
         
-        for uid in new_uids:
+        for uid in collaborator_uids:
             collab_ref = collab_collection.document(uid)
             batch.set(collab_ref, {
                 "uid": uid,
@@ -234,10 +246,8 @@ class CollectionRepository(BaseRepository):
                 "joined_at": timestamp
             })
         
-        # Update contributor_count trên main document
-        total_collaborators = len(existing_uids) + len(new_uids)
+        # Update collaborators_count trên main document
         batch.update(ref, {
-            "contributor_count": total_collaborators,
             "updated_at": timestamp
         })
         
@@ -269,10 +279,8 @@ class CollectionRepository(BaseRepository):
                 collab_ref = collab_collection.document(uid)
                 batch.delete(collab_ref)
         
-        # Update contributor_count trên main document
-        remaining_count = len(existing_collaborators) - sum(1 for uid in collaborator_uids if uid in existing_collaborators)
+        # Update collaborators_count trên main document
         batch.update(ref, {
-            "contributor_count": max(0, remaining_count),
             "updated_at": timestamp
         })
         

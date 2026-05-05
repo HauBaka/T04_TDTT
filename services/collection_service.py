@@ -20,7 +20,8 @@ class CollectionService:
         
         if not created_collection:
             raise AppException(status_code=500, message="Failed to create collection.")
-        
+        await self.add_collaborators_to_collection(created_collection["id"], user_id, [user_id])
+
         return await self.build_response(created_collection)
     
     async def get_collection(self, collection_id: str, requester_id: str | None) -> ResponseSchema[CollectionResponse]:
@@ -60,6 +61,15 @@ class CollectionService:
         if requester_id != owner_uid:
             raise AppException(status_code=403, message="You do not have permission to edit this collection.")
         
+        # check changes
+        for field in ["name", "description", "visibility", "thumbnail_url"]:
+            if field in update_data and str(update_data[field]).strip() == str(collection.get(field, "")).strip():
+                del update_data[field]  # Remove unchanged fields
+
+        # Nếu không có trường nào hợp lệ để cập nhật, trả về lỗi
+        if "name" not in update_data and "description" not in update_data and "visibility" not in update_data and "thumbnail_url" not in update_data:
+            raise AppException(status_code=400, message="No valid fields to update.")
+        
         # Check requester user exists
         requester = await user_repo.get_user(requester_id)
         if not requester:
@@ -92,8 +102,7 @@ class CollectionService:
             raise AppException(status_code=403, message="You do not have permission to edit this collection.")
         
         # Check place_ids có tồn tại không
-        existing = await hotel_repo.get_places(place_ids)
-        valid_ids: list[str] = [pid for pid in place_ids if pid in existing]
+        valid_ids = await hotel_repo.valid_ids(place_ids)
         if not valid_ids:
             raise NotFoundError("None of the provided place IDs are valid.")
 
@@ -101,8 +110,7 @@ class CollectionService:
         updated_collection = await collection_repo.add_places_to_collection(
             collection_id, 
             valid_ids, 
-            requester_id,
-            hotel_repo=hotel_repo
+            requester_id
         )
         if not updated_collection:
             raise AppException(status_code=500, message="Failed to add places to collection.")
@@ -149,10 +157,19 @@ class CollectionService:
             existing_uids = set(existing_users.keys())
             not_found_uids = [uid for uid in collaborator_uids if uid not in existing_uids]
             if not_found_uids:
-                raise NotFoundError(f"Users {not_found_uids} not found.")
+                raise NotFoundError(f"Invalid collaborator UIDs: {', '.join(not_found_uids)}")
+                # Lấy collaborators hiện có
+        existing_collaborators = await self.collection_repo._get_collaborators_from_subcollection(collection_id)
+        existing_uids = set(existing_collaborators.keys())
         
+        # Lọc những uid bị trùng lặp
+        new_uids = [uid for uid in collaborator_uids if uid not in existing_uids]
+        
+        if not new_uids:
+            raise AppException(status_code=400, message="All provided collaborators are already added to the collection.")
+
         # Thêm vào collection (lưu vào sub-collection với uid, contributed_count, joined_at)
-        updated_collection = await collection_repo.add_collaborators_to_collection(collection_id, collaborator_uids)
+        updated_collection = await collection_repo.add_collaborators_to_collection(collection_id, new_uids)
         if not updated_collection:
             raise AppException(status_code=500, message="Failed to add collaborators to collection.")
         
