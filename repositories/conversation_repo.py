@@ -2,6 +2,8 @@ from repositories.base_repo import BaseRepository
 from datetime import datetime, timezone
 from google.cloud import firestore
 
+from schemas.conversation_schema import ConversationRole
+
 class ConversationRepository(BaseRepository):
     def __init__(self):
         super().__init__("conversations")
@@ -27,7 +29,8 @@ class ConversationRepository(BaseRepository):
         res = await doc_ref.get()
         return res.to_dict()
     
-    async def add_members(self, conversation_id: str, member_uids: list[str]) -> dict | None:
+
+    async def add_members(self, conversation_id: str, member_uids: list[str], roles: list[ConversationRole] | None = None) -> dict | None:
         """Thêm thành viên vào một conversation."""
         doc_ref = self._collection.document(conversation_id)
         batch = self._get_db().batch()
@@ -35,11 +38,11 @@ class ConversationRepository(BaseRepository):
         batch.update(doc_ref, {"member_uids": firestore.ArrayUnion(member_uids)})
 
         # Vòng lặp để tạo các bản thông tin cơ bản user
-        for uid in member_uids:
+        for i, uid in enumerate(member_uids):
             member_detail = {
                 "uid": uid,
                 "joined_at": datetime.now(timezone.utc),
-                "role": "member"
+                "role": roles[i].value if roles and i < len(roles) else ConversationRole.MEMBER.value
             }
             
             member_ref = doc_ref.collection("members").document(uid)

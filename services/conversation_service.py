@@ -24,8 +24,9 @@ class ConversationService:
         res = await self.conversation_repository.create(conversation_data)
         
         # Gọi Repo thêm chi tiết Owner vào sub-collection 'members'
-        await self.conversation_repository.add_members(res["id"], [owner_uid])
-        
+        res = await self.conversation_repository.add_members(res["id"], [owner_uid], [ConversationRole.OWNER])
+        if not res:
+            raise AppException(message="Failed to create conversation", status_code=500)
         # Đồng bộ vào tóm tắt hội thoại của Owner
         summary = {
             "id": res["id"],
@@ -35,15 +36,15 @@ class ConversationService:
         }
         await self.conversation_repository.upsert_user_conversation_summary(owner_uid, res["id"], summary)
         
-        return ResponseSchema(data=ConversationResponse(**res))
+        return ResponseSchema(data=await self._build_response(res))
 
-    async def get_conversation(self, conversation_id: str, requester_uid: str | None) -> ResponseSchema[ConversationResponse]:
+    async def get_conversation(self, conversation_id: str, requester_uid: str) -> ResponseSchema[ConversationResponse]:
         """Lấy thông tin một conversation theo ID."""
         # Lấy thông tin một conversation theo ID
         conv = await self.conversation_repository.get_by_id(conversation_id)
         if not conv:
             raise NotFoundError(message="Conversation not found")
-        if requester_uid and requester_uid not in conv.get("member_uids", []):
+        if requester_uid not in conv.get("member_uids", []):
             raise PermissionDeniedError(message="You do not have permission to access this conversation")
         return ResponseSchema(data=await self._build_response(conv))
     
@@ -52,8 +53,11 @@ class ConversationService:
         conv = await self.conversation_repository.get_by_id(conversation_id)
         if not conv:
             raise NotFoundError(message="Conversation not found")
-        if requester_uid and requester_uid not in conv.get("member_uids", []):
+        if requester_uid not in conv.get("member_uids", []):
             raise PermissionDeniedError(message="You do not have permission to update this conversation")
+        if not update_data.get("name") and not update_data.get("description") and not update_data.get("thumbnail_url"):
+            raise AppException(message="No valid fields to update", status_code=400)
+
         updated_res = await self.conversation_repository.update(conversation_id, update_data)
         
         if not updated_res:
@@ -100,11 +104,17 @@ class ConversationService:
         conv = await self.conversation_repository.get_by_id(conversation_id)
         if not conv:
             raise NotFoundError(message="Conversation not found")
-        if requester_uid and requester_uid not in conv.get("member_uids", []):
+        if requester_uid not in conv.get("member_uids", []):
             raise PermissionDeniedError(message="You are not a member of this conversation")
 
+        # Lọc ra những UID đã tồn tại trong conversation để tránh lỗi khi thêm trùng lặp
+        existing_uids = set(conv.get("member_uids", []))
+        new_uids = [uid for uid in request.member_uids if uid not in existing_uids]
+        if not new_uids:
+            raise AppException(message="All provided UIDs are already members of the conversation", status_code=400)
+
         # Gọi Repo cập nhật mảng + thêm sub-collection members
-        updated_conv = await self.conversation_repository.add_members(conversation_id, request.member_uids)
+        updated_conv = await self.conversation_repository.add_members(conversation_id, new_uids, [ConversationRole.MEMBER] * len(new_uids))
         if not updated_conv:
             raise AppException(message="Failed to update conversation", status_code=500)
         
@@ -115,7 +125,7 @@ class ConversationService:
             "unread_count": 0,
             "updated_at": datetime.now(timezone.utc)
         }
-        for uid in request.member_uids: # chạy ngầm task này
+        for uid in new_uids: # chạy ngầm task này
             # await self.conversation_repository.upsert_user_conversation_summary(uid, conversation_id, summary)
             background_tasks.add_task(
                 self.conversation_repository.upsert_user_conversation_summary, 
@@ -136,16 +146,22 @@ class ConversationService:
         if conv.get("owner_uid") in target_uids:
             raise PermissionDeniedError(message="Owner cannot be removed from the conversation")
 
+        # Lọc ra những UID không tồn tại trong conversation để tránh lỗi khi xóa
+        existing_uids = set(conv.get("member_uids", []))
+        valid_target_uids = [uid for uid in target_uids if uid in existing_uids]
+        if not valid_target_uids:
+            raise AppException(message="None of the provided UIDs are members of the conversation", status_code=400)
+
         # Xóa khỏi conversation
-        updated_conv = await self.conversation_repository.remove_members(conversation_id, target_uids)
+        updated_conv = await self.conversation_repository.remove_members(conversation_id, valid_target_uids)
         if not updated_conv:
             raise AppException(message="Failed to update conversation", status_code=500)
         # Xóa tóm tắt hội thoại của những người bị xóa
         await asyncio.gather(*[
             self.conversation_repository.remove_user_conversation_summary(uid, conversation_id)
-            for uid in target_uids
+            for uid in valid_target_uids
         ])
-        #for uid in target_uids:
+        #for uid in valid_target_uids:
         #    await self.conversation_repository.remove_user_conversation_summary(uid, conversation_id)
         
         return ResponseSchema(data=await self._build_response(updated_conv))
@@ -257,6 +273,10 @@ class ConversationService:
 
     async def mark_conversation_as_read(self, conversation_id: str, requester_uid: str) -> ResponseSchema[bool]:
         """Dùng để FE gọi khi user click vào chat."""
+        conv = await self.conversation_repository.get_by_id(conversation_id)
+        if not conv:
+            raise NotFoundError(message="Conversation not found")
+        
         await self.conversation_repository.reset_user_unread_count(requester_uid, conversation_id)
         return ResponseSchema(data=True)
     
