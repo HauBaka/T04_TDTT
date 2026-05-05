@@ -11,6 +11,7 @@ from api.invitation import invitation_router
 from api.notification import notification_router
 from api.conversation import conversation_router
 from api.trip import trip_router
+from api.chatbot import chatbot_router
 from core.database import firebase_manager
 from core.exceptions import AppException
 from mock_data.virtual_review import virtual_review_manager
@@ -53,6 +54,7 @@ app.include_router(invitation_router, tags=["invitation"])
 app.include_router(notification_router, tags=["notification"])
 app.include_router(conversation_router, tags=["conversation"])
 app.include_router(trip_router, tags=["trip"])
+app.include_router(chatbot_router, tags=["chatbot"])
 # Xử lý các lỗi
 @app.exception_handler(AppException) # Xử lý lỗi ứng dụng
 async def app_exception_handler(request: Request, exc: AppException):

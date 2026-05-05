@@ -144,6 +144,20 @@ class HotelRepository(BaseRepository):
 
         return hotels
 
+    async def list_hotels(self, limit: int = 300) -> list[DiscoverHotel]:
+        """Lấy danh sách khách sạn bất kỳ trong DB để làm nguồn truy xuất RAG."""
+        docs = await self._collection.limit(max(1, min(limit, 1000))).get()
+        hotels: list[DiscoverHotel] = []
+
+        for doc in docs:
+            data = doc.to_dict()
+            try:
+                hotel = DiscoverHotel.model_validate(data)
+                hotels.append(hotel)
+            except Exception as exc:
+                logger.warning(f"Skip invalid hotel document {doc.id}: {str(exc)}")
+
+        return hotels
     async def get_hotels(self, property_tokens: list[str]) -> dict[str, dict]:
         """Lấy thông tin nhiều khách sạn từ danh sách property tokens."""
         if not property_tokens:

@@ -9,9 +9,12 @@ class ConversationRepository(BaseRepository):
         super().__init__("conversations")
 
 
-    async def create(self, conversation_data: dict) -> dict:
+    async def create(self, conversation_data: dict, chat_id: str | None = None) -> dict:
         """Tạo doc hội thoại mới trong collection 'conversations'."""
-        doc_ref = self._collection.document()
+        if chat_id:
+            doc_ref = self._collection.document(chat_id)
+        else:
+            doc_ref = self._collection.document()
         conversation_data["id"] = doc_ref.id
         await doc_ref.set(conversation_data)
         return conversation_data
