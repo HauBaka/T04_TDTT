@@ -258,7 +258,7 @@ class ChatbotService:
                     chatbot_conv_id, requester_uid, SendMessageRequest(content=user_message)
                 )
                 await conversation_service.send_message_to_conversation(
-                    chatbot_conv_id, "chatbot", SendMessageRequest(content=bot_response)
+                    chatbot_conv_id, "chatbot_system", SendMessageRequest(content=bot_response)
                 )
             except Exception as e:
                 logger.error(f"Failed to save chat logs: {e}")

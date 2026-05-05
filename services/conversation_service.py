@@ -53,8 +53,13 @@ class ConversationService:
         conv = await self.conversation_repository.get_by_id(conversation_id)
         if not conv:
             raise NotFoundError(message="Conversation not found")
+        
         if requester_uid not in conv.get("member_uids", []):
             raise PermissionDeniedError(message="You do not have permission to update this conversation")
+        
+        if conv.get("id", "").startswith("chatbot_conv_"):
+            raise PermissionDeniedError(message="Default chatbot conversation cannot be updated")
+
         if not update_data.get("name") and not update_data.get("description") and not update_data.get("thumbnail_url"):
             raise AppException(message="No valid fields to update", status_code=400)
 
@@ -77,9 +82,13 @@ class ConversationService:
         conv = await self.conversation_repository.get_by_id(conversation_id)
         if not conv:
             raise NotFoundError(message="Conversation not found")
+
         if conv.get("owner_uid") != requester_uid:
             raise PermissionDeniedError(message="Only the owner can delete this conversation")
-
+        # Ngăn không cho xóa conversation mặc định của chatbot
+        if conv.get("id", "").startswith("chatbot_conv_"):
+            raise PermissionDeniedError(message="Default chatbot conversation cannot be deleted")
+        
         member_uids = conv.get("member_uids", [])
         # for uid in member_uids: # chạy ngầm task này
         #     # Gọi hàm xóa sub-collection conversations của từng User
@@ -146,6 +155,9 @@ class ConversationService:
         if conv.get("owner_uid") in target_uids:
             raise PermissionDeniedError(message="Owner cannot be removed from the conversation")
 
+        if "chatbot_system" in target_uids:
+            raise PermissionDeniedError(message="System member cannot be removed from the conversation")
+
         # Lọc ra những UID không tồn tại trong conversation để tránh lỗi khi xóa
         existing_uids = set(conv.get("member_uids", []))
         valid_target_uids = [uid for uid in target_uids if uid in existing_uids]
@@ -166,7 +178,7 @@ class ConversationService:
         
         return ResponseSchema(data=await self._build_response(updated_conv))
     
-    async def send_message_to_conversation(self, conversation_id: str, requester_uid: str, message_data: SendMessageRequest, background_tasks: BackgroundTasks) -> ResponseSchema[ConversationResponse]:
+    async def send_message_to_conversation(self, conversation_id: str, requester_uid: str, message_data: SendMessageRequest, background_tasks: BackgroundTasks | None = None) -> ResponseSchema[ConversationResponse]:
         """Gửi một tin nhắn mới vào một conversation."""
         """Cập nhật số tin nhắn chưa đọc của các thành viên khác trong nhóm."""
         conv = await self.conversation_repository.get_by_id(conversation_id)
@@ -205,18 +217,25 @@ class ConversationService:
                 "latest_msg": last_msg_summary,
                 "updated_at": datetime.now(timezone.utc)
             }
-            background_tasks.add_task(
-                self.conversation_repository.upsert_user_conversation_summary,
-                uid, conversation_id, summary_update
-            )
+            if background_tasks:
+                background_tasks.add_task(
+                    self.conversation_repository.upsert_user_conversation_summary,
+                    uid, conversation_id, summary_update
+                )
+            else:
+                await self.conversation_repository.upsert_user_conversation_summary(
+                    uid, conversation_id, summary_update
+                )
             # Nếu người trong vòng lặp không phải là người gửi, tăng số tin chưa đọc lên 1
             if uid != requester_uid:
                 #await self.conversation_repository.increment_user_unread_count(uid, conversation_id)
-                background_tasks.add_task(
-                    self.conversation_repository.increment_user_unread_count,
-                    uid, conversation_id
-                )
-        
+                if background_tasks:
+                    background_tasks.add_task(
+                        self.conversation_repository.increment_user_unread_count,
+                        uid, conversation_id
+                    )
+                else:
+                    await self.conversation_repository.increment_user_unread_count(uid, conversation_id)
         return ResponseSchema(data=await self._build_response(conv))
 
 
@@ -255,7 +274,7 @@ class ConversationService:
                 "updated_at": now,
                 "member_uids": [uid, "chatbot_system"]
             }
-            conv = await self.conversation_repository.create(new_data)
+            conv = await self.conversation_repository.create(new_data, chat_id=chatbot_conv_id)
             conv = await self.conversation_repository.add_members(conv["id"], [uid, "chatbot_system"])
             if not conv:
                 raise AppException(message="Failed to create default chatbot conversation", status_code=500)
