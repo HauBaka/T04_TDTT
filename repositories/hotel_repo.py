@@ -158,5 +158,44 @@ class HotelRepository(BaseRepository):
                 logger.warning(f"Skip invalid hotel document {doc.id}: {str(exc)}")
 
         return hotels
+    async def get_hotels(self, property_tokens: list[str]) -> dict[str, dict]:
+        """Lấy thông tin nhiều khách sạn từ danh sách property tokens."""
+        if not property_tokens:
+            return {}
+        
+        try:
+            doc_refs = [self._collection.document(token) for token in property_tokens]
+            docs = [doc async for doc in self._get_db().get_all(doc_refs)]
+            hotels = {doc.id: doc.to_dict() or {} for doc in docs if doc.exists}
+        except Exception as e:
+            logger.error(f"Error fetching hotels: {str(e)}")
+            hotels = {}
+        return hotels
+
+    async def get_places(self, place_ids: list[str]) -> list[dict]:
+        """Lấy thông tin nhiều địa điểm (places) dựa trên place_ids."""
+        if not place_ids:
+            return []
+        
+        places = []
+        hotel_data = await self.get_hotels(place_ids)
+        
+        for place_id in place_ids:
+            if place_id in hotel_data:
+                place_info = hotel_data[place_id].copy()
+                place_info['id'] = place_id  # Thêm id vào object
+                places.append(place_info)
+        
+        return places
+
+    async def valid_ids(self, place_ids: list[str]) -> list[str]:
+        """Kiểm tra xem tất cả place_ids có tồn tại trong database hay không."""
+        return [
+            doc.id
+            async for doc in self._get_db().get_all(
+                [self._collection.document(pid) for pid in place_ids]
+            )
+            if doc.exists
+        ]
 
 hotel_repo = HotelRepository()

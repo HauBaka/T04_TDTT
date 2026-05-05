@@ -55,3 +55,14 @@ async def remove_tags_from_collection(collection_id: str, tags_request: RemoveMu
 async def delete_collection(collection_id: str, requester=Depends(get_current_user(optional=False))):
     """Xóa một collection cụ thể."""
     return await collection_service.delete_collection(collection_id, requester.get("uid"))
+
+@collection_router.post("/collections/{collection_id}/save", response_model=ResponseSchema[bool])
+async def save_collection(collection_id: str, requester=Depends(get_current_user(optional=False))):
+    """Lưu một collection vào danh sách đã lưu của người dùng."""
+    return await collection_service.save_collection(collection_id, requester.get("uid"))
+
+@collection_router.post("/collections/{collection_id}/unsave", response_model=ResponseSchema[bool])
+async def unsave_collection(collection_id: str, requester=Depends(get_current_user(optional=False))):
+    """Bỏ lưu một collection khỏi danh sách đã lưu của người dùng."""
+    return await collection_service.unsave_collection(collection_id, requester.get("uid"))
+

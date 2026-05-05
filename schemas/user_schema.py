@@ -49,4 +49,5 @@ class UserUpdateRequest(BaseModel):
     email: str | None = Field(None, pattern=r'^[\w\.-]+@[\w\.-]+\.\w+$')
     phone_number: str | None = Field(None, max_length=10)
     avatar_url: str | None = None
+    current_trip: str | None = None
     bio: str | None = Field(None, max_length=500)
