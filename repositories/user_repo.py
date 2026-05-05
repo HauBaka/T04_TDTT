@@ -1,3 +1,4 @@
+import asyncio
 from core.database import get_db
 from repositories.base_repo import BaseRepository
 class UserRepository(BaseRepository):
@@ -24,18 +25,21 @@ class UserRepository(BaseRepository):
         unique_uids = list(set(uids))
         result = {}
         chunk_size = 30
-        for i in range(0, len(unique_uids), chunk_size): # TODO: chạy song song để tăng tốc độ
+
+        tasks = []
+        for i in range(0, len(unique_uids), chunk_size):
             chunk = unique_uids[i:i + chunk_size]
-            docs = await self._collection.where("uid", "in", chunk).get()
-            
+            query = self._collection.where("uid", "in", chunk).get()
+            tasks.append(query)
+        results_list = await asyncio.gather(*tasks)
+        for docs in results_list:
             for doc in docs:
                 user_data = doc.to_dict()
                 # Thêm if để pass qua khâu check lỗi của Pylance
                 if user_data: 
                     user_data["uid"] = doc.id 
                     result[doc.id] = user_data
-
-        return result   
+        return result
     
     async def update_user(self, uid: str, update_data: dict) -> None:
         # NOTE: Để service xử lý exceptions
