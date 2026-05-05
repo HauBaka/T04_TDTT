@@ -37,6 +37,22 @@ class BaseRepository:
         """Cập nhật document"""
         await self._collection.document(doc_id).update(update_data)
 
+    async def _delete_subcollection(self, sub_ref) -> None:
+        batch = self._get_db().batch()
+        count = 0
+
+        async for doc in sub_ref.stream():
+            batch.delete(doc.reference)
+            count += 1
+
+            if count == 500:
+                await batch.commit()
+                batch = self._get_db().batch()
+                count = 0
+
+        if count > 0:
+            await batch.commit()
+
     async def _delete(self, doc_id: str) -> bool:
         """Xóa một document"""
         ref = self._collection.document(doc_id)
@@ -47,3 +63,4 @@ class BaseRepository:
 
         await ref.delete()
         return True
+    

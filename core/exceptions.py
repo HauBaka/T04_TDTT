@@ -22,3 +22,8 @@ class UnauthorizedError(AppException):
 class ConflictError(AppException):
     def __init__(self, message: str = "Conflict"):
         super().__init__(status_code=409, message=message)
+
+class PermissionDeniedError(AppException):
+    def __init__(self, message: str = "Permission denied"):
+        super().__init__(status_code=403, message=message)
+    

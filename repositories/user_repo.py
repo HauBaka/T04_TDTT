@@ -60,6 +60,7 @@ class UserRepository(BaseRepository):
         for doc in docs:
             return doc.to_dict()
         return None
+
     async def batch_update_current_trip(self, uids: list[str], trip_id: str | None) -> bool:
         """
         Cập nhật field current_trip cho nhiều user cùng lúc bằng Batch Write.
@@ -87,5 +88,5 @@ class UserRepository(BaseRepository):
         except Exception as e:
             print(f"Error in batch_update_current_trip: {e}")
             return False
-        
+
 user_repo = UserRepository()
