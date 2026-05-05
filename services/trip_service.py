@@ -107,11 +107,17 @@ class TripService:
     
     async def add_members_to_trip(self, trip_id: str, requester_uid: str, member_uids: list[str]) -> ResponseSchema[TripResponse]:
         """Thêm nhiều thành viên vào một trip."""
-        # TODO: chỉ có thể thêm khi trip đang ở trạng thái WAITING
         trip = await self.trip_repo.get_by_id(trip_id)
         if not trip:
             raise NotFoundError("Trip not found.")
-        
+            
+        trip_status = trip.get("status")
+        if trip_status != TripStatus.WAITING.value:
+            raise AppException(
+                status_code=400, 
+                message=f"Cannot add members. Trip is currently in '{trip_status}' status, expected 'waiting'."
+            )
+            
         current_members = trip.get("member_uids", [])
         if requester_uid not in current_members:
             raise AppException(status_code=403, message="You must be a member to add others.")
@@ -183,11 +189,15 @@ class TripService:
 
     async def get_trip_members(self, trip_id: str, requester_uid: str) -> ResponseSchema[list[TripMemberTracking]]:
         """Lấy thông tin thành viên của một trip."""
-        # TODO: chỉ có thể xem khi là member của trip đó
         trip = await self.trip_repo.get_by_id(trip_id)
         if not trip:
             raise NotFoundError("Trip not found.")
-        
+        current_members = trip.get("member_uids", [])
+        if requester_uid not in current_members:
+            raise AppException(
+                status_code=403, 
+                message="You must be a member of this trip to view its members."
+            )
         members_data = await self.trip_repo.get_members(trip_id)
         members = [TripMemberTracking(**member) for member in members_data]
         
