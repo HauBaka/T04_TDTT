@@ -34,4 +34,21 @@ class UserRepository(BaseRepository):
             return doc.to_dict()
         return None
 
+    async def get_users(self, uids: list[str]) -> dict[str, dict]:
+        """Lấy thông tin nhiều người dùng từ danh sách uid."""
+        if not uids:
+            return {}
+        
+        users = {}
+        for uid in uids:
+            try:
+                user = await self.get_user(uid)
+                if user:
+                    users[uid] = user
+            except Exception as e:
+                from loguru import logger
+                logger.error(f"Error fetching user {uid}: {str(e)}")
+        
+        return users
+
 user_repo = UserRepository()
