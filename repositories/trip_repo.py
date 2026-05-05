@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone
 from google.cloud import firestore as fs
 from schemas.response_schema import ResponseSchema
@@ -112,8 +113,12 @@ class TripRepository(BaseRepository):
         if not valid_uids:
             return []
         await batch.commit()
+        
+        tasks = [members_ref.document(uid).get() for uid in valid_uids]
+        docs = await asyncio.gather(*tasks)
+        
         updated_members = []
-        for uid in valid_uids: # TODO: chạy ngầm (song song) để tăng tốc độ
+        for uid in valid_uids: 
             doc = await members_ref.document(uid).get()
             if doc.exists:
                 member_data = doc.to_dict()
@@ -138,7 +143,22 @@ class TripRepository(BaseRepository):
     
     async def delete(self, trip_id: str) -> bool:
         """Xóa một trip."""
-        # TODO: Cần xóa cả subcollections trước khi xóa trip
+        if not trip_id:
+            return False
+
+        db = self._get_db()
+        members_ref = db.collection("trips").document(trip_id).collection("members")
+        
+        docs = members_ref.stream()
+        batch = db.batch()
+        has_members = False
+        
+        async for doc in docs:
+            batch.delete(doc.reference)
+            has_members = True
+            
+        if has_members:
+            await batch.commit()
         return await self._delete(trip_id)
     
 trip_repo = TripRepository()
