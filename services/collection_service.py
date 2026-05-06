@@ -8,7 +8,9 @@ from repositories.collection_repo import collection_repo
 from core.exceptions import AppException, NotFoundError
 from schemas.response_schema import ResponseSchema
 from services.invitation_service import invitation_service
+from schemas.invitation_schema import InvitationType
 from services.notification_service import notification_service
+from schemas.notification_schema import NotificationType
 
 class CollectionService:
     def __init__(self):
@@ -126,7 +128,7 @@ class CollectionService:
         return await self.build_response(updated_collection)
     
     async def add_collaborators_to_collection(self, collection_id: str, requester_id: str, collaborator_uids: list[str]) -> ResponseSchema[CollectionResponse]:
-        """Thêm nhiều cộng tác viên vào một collection."""
+        """Thêm nhiều cộng tác viên vào một collection. Gửi invitation"""
         # Check collection có tồn tại không
         collection = await collection_repo.get_collection(collection_id)
         if not collection:
@@ -145,15 +147,29 @@ class CollectionService:
             if not_found_uids:
                 raise NotFoundError(f"Users {not_found_uids} not found.")
         
-        # Thêm vào collection (lưu vào sub-collection với uid, contributed_count, joined_at)
-        updated_collection = await collection_repo.add_collaborators_to_collection(collection_id, collaborator_uids)
-        if not updated_collection:
-            raise AppException(status_code=500, message="Failed to add collaborators to collection.")
-        
-        return await self.build_response(updated_collection)
+        for target_uid in collaborator_uids:
+            invitation_data = {
+                "sender_uid": requester_id,
+                "target_uid": target_uid,
+                "type": InvitationType.COLLECTION.value,
+                "ref_id": collection_id
+            }
+            await invitation_service.create_invitation(invitation_data)
+
+            await notification_service.create_notification(
+                user_id=target_uid,
+                notification_data={
+                    "type": NotificationType.COLLABORATION_INVITE.value,
+                    "content": f"You have been invited to collaborate on collection '{collection.get('name', '')}' by user {requester_id}.",
+                    "ref_id": collection_id,
+                    "actor_id": requester_id
+                }
+            )
+            
+        return await self.build_response(collection)
 
     async def remove_collaborators_from_collection(self, collection_id: str, requester_id: str, collaborator_uids: list[str]) -> ResponseSchema[CollectionResponse]:
-        """Xóa nhiều cộng tác viên khỏi một collection. Tránh xóa owner."""
+        """Xóa nhiều cộng tác viên khỏi một collection. Tránh xóa owner. Gửi notification"""
         # Check collection có tồn tại không
         collection = await collection_repo.get_collection(collection_id)
         if not collection:
@@ -173,6 +189,18 @@ class CollectionService:
         if not updated_collection:
             raise AppException(status_code=500, message="Failed to remove collaborators from collection.")
         
+        collection_name = collection.get("name", "")
+        for target_uid in collaborator_uids:
+            await notification_service.create_notification(
+                user_id=target_uid,
+                notification_data={
+                    "type": NotificationType.COLLABORATION_REMOVAL.value,
+                    "content": f"You have been removed from collaborating on collection '{collection_name}' by user {requester_id}.",
+                    "ref_id": collection_id,
+                    "actor_id": requester_id
+                }
+            )
+
         return await self.build_response(updated_collection)
     
     async def add_tags_to_collection(self, collection_id: str, requester_id: str, tags: list[str]) -> ResponseSchema[CollectionResponse]:
