@@ -38,7 +38,9 @@ async def remove_liked_collection(place_id: str, current_user=Depends(get_curren
         add=False
     )
 
-
+@user_router.get("/me/collections", response_model=ResponseSchema)
+async def get_liked_collections(current_user=Depends(get_current_user(optional=False))):
+    return await user_service.get_collections(requester_uid=current_user['uid'])
 
 @user_router.delete("/me", response_model=ResponseSchema)
 async def delete_user(current_user=Depends(get_current_user(optional=False))):

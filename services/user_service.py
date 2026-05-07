@@ -1,5 +1,6 @@
 from core.exceptions import ConflictError, NotFoundError
-from repositories.user_repo import UserRepository
+from repositories.user_repo import user_repo
+from repositories.collection_repo import collection_repo
 from schemas.user_schema import UserPublic, UserPrivate
 from schemas.response_schema import ResponseSchema
 
@@ -7,7 +8,7 @@ ALLOWED_UPDATE_FIELDS = {"display_name", "username", "email", "phone_number", "b
 
 class UserService:
     def __init__(self):
-        self.user_repo = UserRepository()
+        self.user_repo = user_repo
 
     async def get_me(self, requester_uid: str) -> ResponseSchema:
         user_dict = await self.user_repo.get_user(requester_uid)
@@ -64,6 +65,16 @@ class UserService:
         deleted = await self.user_repo.delete_user(requester_uid)
         if not deleted:
             raise NotFoundError("User not found")
+        
         return ResponseSchema(status_code=200, message="Account deleted successfully", data=None)
         
+    async def get_collections(self, requester_uid: str) -> ResponseSchema:
+        owned_collections = await collection_repo.get_user_collections(requester_uid)
+        collaborated_collections = await collection_repo.get_collaborated_collections(requester_uid)
+        
+        return ResponseSchema(status_code=200, message="Collections retrieved successfully", data={
+            "owned": owned_collections,
+            "collaborated": collaborated_collections
+        })
+
 user_service = UserService()

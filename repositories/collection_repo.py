@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone
 from weakref import ref
 from google.cloud import firestore as fs
@@ -330,5 +331,70 @@ class CollectionRepository(BaseRepository):
         collection_data["id"] = ref.id
         return collection_data
 
+    async def get_user_collections(self, uid: str) -> list[dict]:
+        """Lấy danh sách collections mà người dùng sở hữu."""
+        query = (
+            self._collection
+            .where("owner_uid", "==", uid)
+            .order_by("created_at", direction=fs.Query.DESCENDING)
+        )
+        collections = []
+        async for doc in query.stream():
+            if doc.exists:
+                data = doc.to_dict() or {}
+                data["id"] = doc.id
+                collections.append(data)
+        return collections
+
+    async def get_collaborated_collections(self, uid: str) -> list[dict]:
+        """Lấy collections mà user cộng tác, không bao gồm owner."""
+        query = (
+            self._get_db()
+            .collection_group("collaborators")
+            .where("uid", "==", uid)
+            .order_by("joined_at", direction=fs.Query.DESCENDING)
+        )
+
+        collaborator_data = []
+
+        async for collaborator_doc in query.stream():
+            collection_ref = collaborator_doc.reference.parent.parent
+
+            if collection_ref is None:
+                continue
+
+            collaborator_data.append({
+                "meta": collaborator_doc.to_dict() or {},
+                "task": collection_ref.get()
+            })
+
+        docs = await asyncio.gather(
+            *[item["task"] for item in collaborator_data],
+            return_exceptions=True
+        )
+
+        collections = []
+
+        for item, doc in zip(collaborator_data, docs):
+            if isinstance(doc, BaseException):
+                logger.error(f"Error fetching collaborated collection: {str(doc)}")
+                continue
+
+            if not doc.exists:
+                continue
+
+            data = doc.to_dict() or {}
+
+            if data.get("owner_uid") == uid:
+                continue
+
+            data["id"] = doc.id
+            data["joined_at"] = item["meta"].get("joined_at")
+            data["contributed_count"] = item["meta"].get("contributed_count")
+            data["role"] = "collaborator"
+
+            collections.append(data)
+
+        return collections
 
 collection_repo = CollectionRepository()
