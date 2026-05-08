@@ -5,7 +5,7 @@ from google.cloud.firestore_v1.base_query import FieldFilter
 from repositories.base_repo import BaseRepository
 
 from schemas.view_schema import TopType, ViewTargetType
-from schemas.collection_schema import CollectionPublic
+from schemas.collection_schema import CollectionPublic, CollectionVisibility
 from schemas.discover_schema import DiscoverHotel
 
 MODEL_MAP = {
@@ -99,17 +99,18 @@ class ViewRepository(BaseRepository):
         cur_year = iso[0]
         cur_week = iso[1]
 
+
+        query = db.collection(target_collection_name)
+        if target_type == ViewTargetType.COLLECTION:
+            query = query.where(filter=FieldFilter("visibility", "==", CollectionVisibility.PUBLIC.value))
+
         if top_type == TopType.ALL_TIME:
             # Lấy top views theo tổng số lần xem
-            query = (
-                db.collection(target_collection_name)
-                .order_by("views.total_views", direction=firestore.Query.DESCENDING)
-            )
+            query = query.order_by("views.total_views", direction=firestore.Query.DESCENDING)
         else:
             # Lấy top views theo tuần
             query = (
-                db.collection(target_collection_name)
-                .where(filter=FieldFilter("views.year", "==", cur_year))
+                query.where(filter=FieldFilter("views.year", "==", cur_year))
                 .where(filter=FieldFilter("views.week", "==", cur_week))
                 .order_by("views.weekly_views", direction=firestore.Query.DESCENDING)
             )
