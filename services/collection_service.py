@@ -7,6 +7,7 @@ from schemas.collection_schema import CollectionPublic, CollectionResponse, Coll
 from repositories.collection_repo import collection_repo
 from core.exceptions import AppException, NotFoundError
 from schemas.response_schema import ResponseSchema
+from schemas.view_schema import ViewResponse
 from services.invitation_service import invitation_service
 from services.notification_service import notification_service
 
@@ -290,7 +291,8 @@ class CollectionService:
             collaborators = collection_data.get("collaborators", []),
             places = collection_data.get("places", []),
             tags = collection_data.get("tags", []),
-            visibility = CollectionVisibility(collection_data.get("visibility", "public"))
+            visibility = CollectionVisibility(collection_data.get("visibility", "public")),
+            views = collection_data.get("views", ViewResponse())
         )
         return ResponseSchema(data=CollectionResponse(collection=collection))
 

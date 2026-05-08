@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
 from enum import Enum
-
+from schemas.view_schema import ViewResponse
 class CollectionCollaborator(BaseModel):
     uid: str
     contributed_count: int = 0 # số lượng địa điểm mà cộng tác viên đã thêm vào collection
@@ -49,7 +49,7 @@ class CollectionPublic(BaseModel):
     savers: list[CollectionSaver] = Field(default_factory=list)
     collaborators: list[CollectionCollaborator] = Field(default_factory=list)
     places: list[CollectionPlace] = Field(default_factory=list) 
-    
+    views: ViewResponse = Field(default_factory=ViewResponse)
     # Các tag do người dùng gắn cho bộ sưu tập
     tags: list[str] = Field(default_factory=list)
     visibility: CollectionVisibility = CollectionVisibility.PUBLIC

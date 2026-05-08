@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field, model_validator
 from datetime import datetime, timezone
 from typing import Annotated
 from schemas.trip_context_schema import TravelStyle, TripSearchCriteria
-
+from schemas.view_schema import ViewResponse
 # ==============================
 # CÁC CLASS REQUEST & VALIDATION
 # ==============================
@@ -164,6 +164,9 @@ class DiscoverHotel(BaseModel):
 
     # updates
     last_updated: datetime | None = None
+
+    # views
+    views: ViewResponse = Field(default_factory=ViewResponse)
 
 class DiscoverResponse(BaseModel):
     data: list[DiscoverHotel] # Danh sách các khách sạn phù hợp, mỗi khách sạn là một dict với thông tin chi tiết

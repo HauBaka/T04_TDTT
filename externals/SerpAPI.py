@@ -4,6 +4,7 @@ from core.http_client import get_http_client
 from core.settings import settings
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from schemas.view_schema import ViewResponse
 from utils.beauty_json import list_to_str
 from schemas.serpapi_schema import SerpAPIResultSchema
 from schemas.discover_schema import DiscoverHotel, GPSCoordinates, HotelImage
@@ -155,7 +156,8 @@ class SerpAPIClient:
                         amenities=hotel.get("amenities", []),
 
                         raw_rating= 0.0, # Dùng data ảo
-                        user_reviews = []
+                        user_reviews = [],
+                        views=ViewResponse()
                     )
                     parsed_hotels.append(hotel_obj)
                 except Exception as e:
