@@ -10,6 +10,9 @@ from schemas.collection_schema import ModifyAction
 
 from repositories.base_repo import BaseRepository
 
+from google.cloud.firestore_v1.base_query import FieldFilter
+
+from schemas.view_schema import ViewResponse
 class CollectionRepository(BaseRepository):
     def __init__(self):
         super().__init__("collections")
@@ -26,6 +29,7 @@ class CollectionRepository(BaseRepository):
             "collaborators_count": 0,
             "place_count": 0,
             "tags": data.get("tags") or [],
+            "views": ViewResponse().model_dump()
         })
 
         ref_id = await self._create(data)
@@ -335,7 +339,7 @@ class CollectionRepository(BaseRepository):
         """Lấy danh sách collections mà người dùng sở hữu."""
         query = (
             self._collection
-            .where("owner_uid", "==", uid)
+            .where(filter=FieldFilter("owner_uid", "==", uid))
             .order_by("created_at", direction=fs.Query.DESCENDING)
         )
         collections = []
@@ -351,7 +355,7 @@ class CollectionRepository(BaseRepository):
         query = (
             self._get_db()
             .collection_group("collaborators")
-            .where("uid", "==", uid)
+            .where(filter=FieldFilter("uid", "==", uid))
             .order_by("joined_at", direction=fs.Query.DESCENDING)
         )
 
