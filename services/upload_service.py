@@ -76,10 +76,10 @@ class UploadService:
         size_bytes = int(head.get("ContentLength", 0))
         content_type = str(head.get("ContentType", ""))
 
-        if size_bytes <= 0:
-            raise AppException("Invalid object size", status_code=400)
+        self._validate_file_size(size_bytes)
 
-        if size_bytes != request.file_size:
+        expected_size = pending.get("file_size")
+        if expected_size is not None and size_bytes != int(expected_size):
             raise ValidationError("Uploaded file size mismatch")
 
         self._validate_mime_type(content_type)
