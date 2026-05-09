@@ -11,9 +11,7 @@ class ConversationMember(BaseModel):
     role: ConversationRole = ConversationRole.MEMBER
     joined_at: datetime
     # TODO: update các field dưới đây, mỗi khi GET conversation để đảm bảo thông tin của member luôn được cập nhật
-    display_name: str | None = None
-    username: str | None = None
-    avatar_url: str | None = None
+
 
 class AttachmentType(str, Enum):
     IMAGE = "image"
@@ -29,7 +27,7 @@ class ConversationMessage(BaseModel):
     sender_uid: str
     content: str
     sent_at: datetime
-    attachments: list[ConversationMessageAttachment] = Field(default_factory=list)  # Danh sách các tệp đính kèm (nếu có)
+    attachments: list[ConversationMessageAttachment] = Field(default_factory=list, min_length=0, max_length=5)  # Danh sách các tệp đính kèm (nếu có)
 
 class ConversationCreateRequest(BaseModel):
     name: str = Field(..., min_length=3, max_length=32)
@@ -54,7 +52,10 @@ class ConversationResponse(BaseModel):
 class AddMembersRequest(BaseModel):
     member_uids: list[str] = Field(..., min_length=1, max_length=10, description="Danh sách UID của các thành viên cần thêm vào conversation. Tối đa 10 thành viên mỗi lần thêm.")
 
+class RemoveMembersRequest(BaseModel):
+    member_uids: list[str] = Field(..., min_length=1, max_length=10, description="Danh sách UID của các thành viên cần xóa khỏi conversation. Tối đa 10 thành viên mỗi lần xóa.")
+
 class SendMessageRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=2000, description="Nội dung tin nhắn. Tối đa 2000 ký tự.")
-    attachments: list[ConversationMessageAttachment] = Field(default_factory=list, description="Danh sách các tệp đính kèm cho tin nhắn. Tối đa 5 tệp đính kèm mỗi tin nhắn.")
+    attachments: list[ConversationMessageAttachment] = Field(default_factory=list, min_length=0, max_length=5, description="Danh sách các tệp đính kèm cho tin nhắn. Tối đa 5 tệp đính kèm mỗi tin nhắn.")
     
