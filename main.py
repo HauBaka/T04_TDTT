@@ -16,6 +16,8 @@ from api.view import view_router
 from api.upload import upload_router
 from core.database import firebase_manager
 from core.exceptions import AppException
+from core.limiter import limiter, AutoRateLimitMiddleware
+from slowapi.middleware import SlowAPIMiddleware
 from mock_data.virtual_review import virtual_review_manager
 from externals.PhoBERT import PhoBERT
 from externals.SemanticModel import semantic_model_client
@@ -46,6 +48,7 @@ async def lifespan(app: FastAPI):
         await http_client._http_client.aclose()
 
 app = FastAPI(lifespan=lifespan)
+app.state.limiter = limiter
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -53,6 +56,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(SlowAPIMiddleware)
+app.add_middleware(AutoRateLimitMiddleware)
 # Đăng ký router
 app.include_router(health_router, tags=["health"])
 app.include_router(discover_router, tags=["discover"])

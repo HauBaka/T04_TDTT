@@ -27,3 +27,6 @@ class PermissionDeniedError(AppException):
     def __init__(self, message: str = "Permission denied"):
         super().__init__(status_code=403, message=message)
     
+class RateLimitExceededError(AppException):
+    def __init__(self, message: str = "Rate limit exceeded"):
+        super().__init__(status_code=429, message=message)
