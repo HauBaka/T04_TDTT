@@ -71,6 +71,21 @@ class UploadService:
         if not pending:
             raise NotFoundError("Pending upload not found")
 
+        expires_at = pending.get("expires_at")
+        if not expires_at:
+            raise AppException("Invalid pending upload state", status_code=400)
+
+        if isinstance(expires_at, str):
+            expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        else:
+            expires_at = expires_at.astimezone(timezone.utc)
+
+        if expires_at <= datetime.now(timezone.utc):
+            raise ValidationError("Pending upload has expired")
+
         head = await r2_client.head_object(request.file_key)
 
         size_bytes = int(head.get("ContentLength", 0))
