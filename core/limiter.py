@@ -4,7 +4,7 @@ from typing import Callable, Optional, Dict
 import inspect
 
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from slowapi import Limiter
@@ -86,4 +86,10 @@ class AutoRateLimitMiddleware(BaseHTTPMiddleware):
             return result
 
         except RateLimitExceeded:
-            raise RateLimitExceededError()
+            return JSONResponse(
+            status_code=429,
+            content={
+                "status_code": 429,
+                "message": "Rate limit exceeded",
+                "data": None
+            })
