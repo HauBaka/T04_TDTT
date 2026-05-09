@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.concurrency import asynccontextmanager
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -12,6 +13,7 @@ from api.notification import notification_router
 from api.conversation import conversation_router
 from api.trip import trip_router
 from api.view import view_router
+from api.upload import upload_router
 from core.database import firebase_manager
 from core.exceptions import AppException
 from mock_data.virtual_review import virtual_review_manager
@@ -44,6 +46,13 @@ async def lifespan(app: FastAPI):
         await http_client._http_client.aclose()
 
 app = FastAPI(lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 # Đăng ký router
 app.include_router(health_router, tags=["health"])
 app.include_router(discover_router, tags=["discover"])
@@ -55,6 +64,7 @@ app.include_router(notification_router, tags=["notification"])
 app.include_router(conversation_router, tags=["conversation"])
 app.include_router(trip_router, tags=["trip"])
 app.include_router(view_router, tags=["view"])
+app.include_router(upload_router, tags=["upload"])
 # Xử lý các lỗi
 @app.exception_handler(AppException) # Xử lý lỗi ứng dụng
 async def app_exception_handler(request: Request, exc: AppException):
