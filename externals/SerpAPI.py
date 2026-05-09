@@ -14,7 +14,7 @@ MAX_PRICE = 10000000
 
 class SerpAPIClient:
     def __init__(self):
-        self.api_key = settings.SERP_API_KEY
+        self.api_key = settings.SERP_API_KEY.get_secret_value()
         self.account_url = "https://serpapi.com/account"
         self.hotel_search_url = "https://serpapi.com/search.json"
         self.reviews_search_url = "https://serpapi.com/search.json"

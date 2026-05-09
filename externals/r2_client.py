@@ -12,18 +12,13 @@ class R2Client:
         self._client = boto3.client(
             "s3",
             endpoint_url=settings.R2_ENDPOINT_URL,
-            aws_access_key_id=settings.R2_ACCESS_KEY_ID,
-            aws_secret_access_key=settings.R2_SECRET_ACCESS_KEY,
+            aws_access_key_id=settings.R2_ACCESS_KEY_ID.get_secret_value(),
+            aws_secret_access_key=settings.R2_SECRET_ACCESS_KEY.get_secret_value(),
             region_name=settings.R2_REGION,
             config=Config(signature_version="s3v4"),
         )
 
-    async def generate_presigned_put_url(
-        self,
-        key: str,
-        content_type: str,
-        expires_in: int,
-    ) -> str:
+    async def generate_presigned_put_url(self, key: str, content_type: str, expires_in: int) -> str:
         def _sign() -> str:
             return self._client.generate_presigned_url(
                 ClientMethod="put_object",

@@ -9,7 +9,7 @@ import pygeohash as pgh
 class VietMapAPI:
     def __init__(self):
         self.search_url = "https://maps.vietmap.vn/api/{type}/v4"
-        self.api_key = settings.VIETMAP_API_KEY
+        self.api_key = settings.VIETMAP_API_KEY.get_secret_value()
         self.display_type = 6
 
     async def get_status(self) -> dict:
