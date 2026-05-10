@@ -1,5 +1,4 @@
 from repositories.base_repo import BaseRepository
-from datetime import datetime, timezone
 from google.cloud import firestore
 
 from schemas.conversation_schema import ConversationRole
@@ -24,7 +23,7 @@ class ConversationRepository(BaseRepository):
     async def update(self, conversation_id: str, update_data: dict) -> dict | None:
         """Cập nhật thông tin một conversation."""
         doc_ref = self._collection.document(conversation_id)
-        update_data["updated_at"] = datetime.now(timezone.utc)
+        update_data["updated_at"] = self._current_timestamp
         await doc_ref.update(update_data)
         res = await doc_ref.get()
         return res.to_dict()
@@ -33,7 +32,7 @@ class ConversationRepository(BaseRepository):
     async def add_members(self, conversation_id: str, member_uids: list[str], roles: list[ConversationRole] | None = None) -> dict | None:
         """Thêm thành viên vào một conversation."""
         doc_ref = self._collection.document(conversation_id)
-        batch = self._get_db().batch()
+        batch = self._db.batch()
         # Sử dụng ArrayUnion để tránh bị trùng lặp UID
         batch.update(doc_ref, {"member_uids": firestore.ArrayUnion(member_uids)})
 
@@ -41,7 +40,7 @@ class ConversationRepository(BaseRepository):
         for i, uid in enumerate(member_uids):
             member_detail = {
                 "uid": uid,
-                "joined_at": datetime.now(timezone.utc),
+                "joined_at": self._current_timestamp,
                 "role": roles[i].value if roles and i < len(roles) else ConversationRole.MEMBER.value
             }
             
@@ -58,7 +57,7 @@ class ConversationRepository(BaseRepository):
     async def remove_members(self, conversation_id: str, member_uids: list[str]) -> dict | None:
         """Xóa thành viên khỏi một conversation."""
         doc_ref = self._collection.document(conversation_id)
-        batch = self._get_db().batch()
+        batch = self._db.batch()
         # Xóa khỏi mảng và xóa khỏi sub-collection
         batch.update(doc_ref, {"member_uids": firestore.ArrayRemove(member_uids)})
         for uid in member_uids:
@@ -118,7 +117,7 @@ class ConversationRepository(BaseRepository):
         return [msg.to_dict() for msg in messages]
 
     async def get_message_by_id(self, conversation_id: str, message_id: str) -> dict | None:
-        doc = await self._get_db().collection("conversations").document(conversation_id)\
+        doc = await self._db.collection("conversations").document(conversation_id)\
                     .collection("messages").document(message_id).get()
         return doc.to_dict() if doc.exists else None
     
@@ -130,21 +129,21 @@ class ConversationRepository(BaseRepository):
 
     async def upsert_user_conversation_summary(self, uid: str, conversation_id: str, summary_data: dict):
         """Cập nhật hoặc tạo mới bản tóm tắt hội thoại trong users/{uid}/conversations/{id}."""
-        user_conv_ref = self._get_db().collection("users").document(uid).collection("conversations").document(conversation_id)
+        user_conv_ref = self._db.collection("users").document(uid).collection("conversations").document(conversation_id)
         await user_conv_ref.set(summary_data, merge=True)
 
     async def increment_user_unread_count(self, uid: str, conversation_id: str):
         """Tăng số lượng tin nhắn chưa đọc lên 1 đơn vị."""
-        user_conv_ref = self._get_db().collection("users").document(uid).collection("conversations").document(conversation_id)
+        user_conv_ref = self._db.collection("users").document(uid).collection("conversations").document(conversation_id)
         await user_conv_ref.update({"unread_count": firestore.Increment(1)})
 
     async def reset_user_unread_count(self, uid: str, conversation_id: str):
         """Trả về 0 nếu đã đọc tin nhắn."""
-        user_conv_ref = self._get_db().collection("users").document(uid).collection("conversations").document(conversation_id)
+        user_conv_ref = self._db.collection("users").document(uid).collection("conversations").document(conversation_id)
         await user_conv_ref.update({"unread_count": 0})
 
     async def remove_user_conversation_summary(self, uid: str, conversation_id: str):
         """Xóa hội thoại khỏi danh sách của User (khi User rời nhóm)."""
-        await self._get_db().collection("users").document(uid).collection("conversations").document(conversation_id).delete()
+        await self._db.collection("users").document(uid).collection("conversations").document(conversation_id).delete()
 
 conversation_repo = ConversationRepository()

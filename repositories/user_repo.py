@@ -1,6 +1,6 @@
 import asyncio
-from core.database import get_db
 from repositories.base_repo import BaseRepository
+from google.cloud.firestore_v1.base_query import FieldFilter
 class UserRepository(BaseRepository):
     def __init__(self):
         super().__init__("users")
@@ -29,7 +29,7 @@ class UserRepository(BaseRepository):
         tasks = []
         for i in range(0, len(unique_uids), chunk_size):
             chunk = unique_uids[i:i + chunk_size]
-            query = self._collection.where("uid", "in", chunk).get()
+            query = self._collection.where(filter=FieldFilter("uid", "in", chunk)).get()
             tasks.append(query)
         results_list = await asyncio.gather(*tasks)
         for docs in results_list:
@@ -49,13 +49,13 @@ class UserRepository(BaseRepository):
         return await self._delete(uid)
 
     async def get_user_by_username(self, username: str) -> dict | None:
-        docs = await self._collection.where("username_lower", "==", username.lower()).limit(1).get()
+        docs = await self._collection.where(filter=FieldFilter("username_lower", "==", username.lower())).limit(1).get()
         for doc in docs:
             return doc.to_dict()
         return None
 
     async def get_user_by_email(self, email: str) -> dict | None:
-        docs = await self._collection.where("email", "==", email.lower()).limit(1).get()
+        docs = await self._collection.where(filter=FieldFilter("email", "==", email.lower())).limit(1).get()
 
         for doc in docs:
             return doc.to_dict()
@@ -68,7 +68,7 @@ class UserRepository(BaseRepository):
         if not uids:
             return True
             
-        db = get_db()  # Lấy instance db để khởi tạo batch
+        db = self._db  # Lấy instance db để khởi tạo batch
         unique_uids = list(set(uids))
         
         # Firestore giới hạn 500 thao tác mỗi batch

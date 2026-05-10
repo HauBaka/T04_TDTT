@@ -1,12 +1,7 @@
 import asyncio
-from datetime import datetime, timezone
-from weakref import ref
 from google.cloud import firestore as fs
 from loguru import logger
 
-from core.database import get_db
-from core.exceptions import AppException, NotFoundError
-from schemas.collection_schema import ModifyAction
 
 from repositories.base_repo import BaseRepository
 
@@ -19,7 +14,7 @@ class CollectionRepository(BaseRepository):
 
     async def create_collection(self, uid: str, collection_request: dict) -> dict:
         """Tạo một collection mới cho người dùng."""
-        timestamp = datetime.now(timezone.utc)
+        timestamp = self._current_timestamp
         data = collection_request.copy()
         data.update({
             "owner_uid": uid,
@@ -50,29 +45,14 @@ class CollectionRepository(BaseRepository):
         if not payload:
             return snapshot.to_dict() or {}
         
-        payload["updated_at"] = datetime.now(timezone.utc)
+        payload["updated_at"] = self._current_timestamp
         await ref.update(payload)
 
-        updated_snapshot = await ref.get()
-        collection_data = updated_snapshot.to_dict() or {}
+        collection_data = snapshot.to_dict() or {}
+        collection_data.update(payload)
         collection_data["id"] = ref.id
+        
         return collection_data
-
-    async def _delete_subcollection(self, sub_ref) -> None:
-        batch = self._get_db().batch()
-        count = 0
-
-        async for doc in sub_ref.stream():
-            batch.delete(doc.reference)
-            count += 1
-
-            if count == 500:
-                await batch.commit()
-                batch = self._get_db().batch()
-                count = 0
-
-        if count > 0:
-            await batch.commit()
 
     async def delete_collection(self, collection_id: str) -> bool:
         """Xóa một collection của người dùng."""
@@ -85,7 +65,7 @@ class CollectionRepository(BaseRepository):
         await self._delete_subcollection(ref.collection("places"))
         await self._delete_subcollection(ref.collection("collaborators"))
         # Xóa main document
-        batch = self._get_db().batch()
+        batch = self._db.batch()
         batch.delete(ref)
         await batch.commit()
 
@@ -134,7 +114,7 @@ class CollectionRepository(BaseRepository):
         
         # Lấy places hiện có
         places_collection = ref.collection("places")
-        docs = self._get_db().get_all(
+        docs = self._db.get_all(
             [places_collection.document(pid) for pid in place_ids]
         )
         existing_docs = {doc.id async for doc in docs if doc.exists}
@@ -147,8 +127,8 @@ class CollectionRepository(BaseRepository):
             return data
         
         # Lưu places vào sub-collection
-        timestamp = datetime.now(timezone.utc)
-        batch = self._get_db().batch()
+        timestamp = self._current_timestamp
+        batch = self._db.batch()
         places_collection = ref.collection("places")
         
         for place_id in new_place_ids:
@@ -185,10 +165,10 @@ class CollectionRepository(BaseRepository):
         if not snapshot.exists:
             return {}
         
-        batch = self._get_db().batch()
+        batch = self._db.batch()
         places_collection = ref.collection("places")
         # Lấy places hiện có
-        docs_gen = self._get_db().get_all(
+        docs_gen = self._db.get_all(
             [places_collection.document(pid) for pid in place_ids]
         )
 
@@ -200,7 +180,7 @@ class CollectionRepository(BaseRepository):
             return data
         
         # Xóa những places được chỉ định
-        timestamp = datetime.now(timezone.utc)
+        timestamp = self._current_timestamp
         
         for place_id in existing_docs:
             batch.delete(places_collection.document(place_id))
@@ -239,8 +219,8 @@ class CollectionRepository(BaseRepository):
         
         
         # Lưu collaborators vào sub-collection với structure: {uid: {contributed_count, joined_at}}
-        timestamp = datetime.now(timezone.utc)
-        batch = self._get_db().batch()
+        timestamp = self._current_timestamp
+        batch = self._db.batch()
         collab_collection = ref.collection("collaborators")
         
         for uid in collaborator_uids:
@@ -275,8 +255,8 @@ class CollectionRepository(BaseRepository):
         existing_collaborators = await self._get_collaborators_from_subcollection(collection_id)
         
         # Xóa những collaborators được chỉ định
-        timestamp = datetime.now(timezone.utc)
-        batch = self._get_db().batch()
+        timestamp = self._current_timestamp
+        batch = self._db.batch()
         collab_collection = ref.collection("collaborators")
         
         for uid in collaborator_uids:
@@ -307,7 +287,7 @@ class CollectionRepository(BaseRepository):
         # Dùng ArrayUnion để tránh duplicate tự động
         update_payload = {
             "tags": fs.ArrayUnion(new_tags),
-            "updated_at": datetime.now(timezone.utc)
+            "updated_at": self._current_timestamp
         }
         
         await ref.update(update_payload)
@@ -326,7 +306,7 @@ class CollectionRepository(BaseRepository):
         # Dùng ArrayRemove để xóa tags
         update_payload = {
             "tags": fs.ArrayRemove(tags_to_remove),
-            "updated_at": datetime.now(timezone.utc)
+            "updated_at": self._current_timestamp
         }
         
         await ref.update(update_payload)
@@ -353,7 +333,7 @@ class CollectionRepository(BaseRepository):
     async def get_collaborated_collections(self, uid: str) -> list[dict]:
         """Lấy collections mà user cộng tác, không bao gồm owner."""
         query = (
-            self._get_db()
+            self._db
             .collection_group("collaborators")
             .where(filter=FieldFilter("uid", "==", uid))
             .order_by("joined_at", direction=fs.Query.DESCENDING)

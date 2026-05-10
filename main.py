@@ -1,3 +1,4 @@
+import time
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.concurrency import asynccontextmanager
@@ -58,6 +59,27 @@ app.add_middleware(
 )
 app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(AutoRateLimitMiddleware)
+# Middleware để log thông tin request và response
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start = time.time()
+
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+    except Exception as e:
+        status_code = 500
+        logger.exception(f"Request failed: {request.method} {request.url.path}")
+        raise
+    finally:
+        process_time = (time.time() - start) * 1000
+        logger.info(
+            f"{request.method} {request.url.path} "
+            f"status={status_code} "
+            f"time={process_time:.2f}ms"
+        )
+
+    return response
 # Đăng ký router
 app.include_router(health_router, tags=["health"])
 app.include_router(discover_router, tags=["discover"])

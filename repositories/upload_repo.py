@@ -1,6 +1,5 @@
 from typing import Any, Dict, Optional
 
-from core.database import get_db
 from repositories.base_repo import BaseRepository
 from schemas.upload_schema import UploadStatus
 from google.cloud.firestore_v1.base_query import FieldFilter

@@ -1,5 +1,4 @@
 import asyncio
-from datetime import datetime, timezone
 from repositories.base_repo import BaseRepository
 from schemas.trip_schema import TripStatus
 class TripRepository(BaseRepository):
@@ -8,7 +7,7 @@ class TripRepository(BaseRepository):
 
     async def create(self, uid: str, trip_data: dict) -> dict | None:
         """Tạo một trip mới."""
-        now = datetime.now(timezone.utc)
+        now = self._current_timestamp
         payload = trip_data.copy()
         
         payload.update({
@@ -40,7 +39,7 @@ class TripRepository(BaseRepository):
         if not payload:
             return await self.get_by_id(trip_id)
         
-        payload["updated_at"] = datetime.now(timezone.utc)
+        payload["updated_at"] = self._current_timestamp
         if "status" in payload and hasattr(payload["status"],"value"):
             payload["status"] = payload["status"].value
 
@@ -55,9 +54,9 @@ class TripRepository(BaseRepository):
         if not members_data:
             return await self.get_by_id(trip_id)
 
-        db = self._get_db()
+        db = self._db
         batch = db.batch()
-        now = datetime.now(timezone.utc)
+        now = self._current_timestamp
 
         trip_ref = db.collection("trips").document(trip_id)
         batch.update(trip_ref, {
@@ -78,11 +77,11 @@ class TripRepository(BaseRepository):
         if not uids:
             return await self.get_by_id(trip_id)
 
-        db = self._get_db()
+        db = self._db
         batch = db.batch()
         trip_ref = db.collection("trips").document(trip_id)
         batch.update(trip_ref, {
-            "updated_at": datetime.now(timezone.utc)
+            "updated_at": self._current_timestamp
         })
 
         for uid in uids:
@@ -98,7 +97,7 @@ class TripRepository(BaseRepository):
         if not trip_id or not updates_data:
             return []
 
-        db = self._get_db()
+        db = self._db
         batch = db.batch()
         members_ref = db.collection("trips").document(trip_id).collection("members")
         valid_uids = []
@@ -131,7 +130,7 @@ class TripRepository(BaseRepository):
         "lấy danh sách member từ sub-collection"
         if not trip_id:
             return []
-        db = self._get_db()
+        db = self._db
         docs = db.collection("trips").document(trip_id).collection("members").stream()
         
         members = []
@@ -147,7 +146,7 @@ class TripRepository(BaseRepository):
         if not trip_id:
             return False
 
-        db = self._get_db()
+        db = self._db
         members_ref = db.collection("trips").document(trip_id).collection("members")
         
         docs = members_ref.stream()

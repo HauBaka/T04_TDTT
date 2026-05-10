@@ -2,10 +2,9 @@ from loguru import logger
 
 from core.settings import settings
 from schemas.discover_schema import DiscoverHotel
-from core.database import get_db
 import asyncio
 import pygeohash as pgh
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from google.cloud.firestore_v1 import FieldFilter
 from repositories.base_repo import BaseRepository
 
@@ -29,10 +28,10 @@ class HotelRepository(BaseRepository):
         if not hotels:
             return
 
-        batch = self._get_db().batch()
+        batch = self._db.batch()
         count = 0
 
-        now = datetime.now(timezone.utc)
+        now = self._current_timestamp
         for hotel in hotels:
             if not hotel.property_token:
                 continue
@@ -51,7 +50,7 @@ class HotelRepository(BaseRepository):
 
             if count >= self.BATCH_LIMIT: # Chia theo từng batch
                 await self._commit_batch(batch)
-                batch = self._get_db().batch()
+                batch = self._db.batch()
                 count = 0
 
         if count > 0:
@@ -61,7 +60,7 @@ class HotelRepository(BaseRepository):
         if not property_tokens:
             return
 
-        batch = self._get_db().batch()
+        batch = self._db.batch()
         count = 0
 
         for token in property_tokens:
@@ -71,7 +70,7 @@ class HotelRepository(BaseRepository):
 
             if count >= self.BATCH_LIMIT:
                 await self._commit_batch(batch)
-                batch = self._get_db().batch()
+                batch = self._db.batch()
                 count = 0
 
         if count > 0:
@@ -80,7 +79,7 @@ class HotelRepository(BaseRepository):
     async def sync_hotels_background(self, hotels: list[DiscoverHotel]):
         """Hàm chạy ngầm để đồng bộ dữ liệu khách sạn mới tìm được vào database mà không cần chờ FE"""
         try:
-            now = datetime.now(timezone.utc)
+            now = self._current_timestamp
             expire_threshold = now - timedelta(days=settings.HOTEL_DATA_EXPIRE_DAYS)
 
             to_upsert = []
@@ -116,20 +115,29 @@ class HotelRepository(BaseRepository):
 
         return neighbors
     
+    async def _query_geohash_range(self, geohash: str):
+        start_hash = geohash
+        end_hash = geohash + "~"
+        docs = self._collection.where(filter=FieldFilter("gps_coordinates.geohash", ">=", start_hash)).where(filter=FieldFilter("gps_coordinates.geohash", "<=", end_hash)).limit(20).stream()
+        result = [
+            doc async for doc in docs
+        ]
+        return result
+
     async def search_hotels(self, lat: float, lng: float) -> list[DiscoverHotel]:
         """Tìm kiếm khách sạn dựa trên tọa độ và bán kính."""
         center_hash  = pgh.encode(lat, lng, precision=settings.GEOHASH_PRECISION)  # precision=5 cho khoảng 4.9km x 4.9km, có thể điều chỉnh tuỳ nhu cầu
         hashes = [center_hash] + self._get_neighbors(center_hash)
+        tasks = [
+            self._query_geohash_range(h) for h in hashes
+        ]
+        query_results = await asyncio.gather(*tasks)
+
         hotels = []
 
         seen_ids = set()
-
-        for h in hashes:
-            start_hash = h
-            end_hash = h + "~"
-            docs = self._collection.where(filter=FieldFilter("gps_coordinates.geohash", ">=", start_hash)).where(filter=FieldFilter("gps_coordinates.geohash", "<=", end_hash)).stream()
-            
-            async for doc in docs:
+        for docs in query_results:
+            for doc in docs:
                 if doc.id in seen_ids: # skip repeated document
                     continue
 
@@ -141,7 +149,7 @@ class HotelRepository(BaseRepository):
                     hotels.append(hotel)
                 except Exception as e:
                     logger.error(f"Error validating hotel data for document {doc.id}: {str(e)}")
-
+                    
         return hotels
 
     async def get_hotels(self, property_tokens: list[str]) -> dict[str, dict]:
@@ -151,7 +159,7 @@ class HotelRepository(BaseRepository):
         
         try:
             doc_refs = [self._collection.document(token) for token in property_tokens]
-            docs = [doc async for doc in self._get_db().get_all(doc_refs)]
+            docs = [doc async for doc in self._db.get_all(doc_refs)]
             hotels = {doc.id: doc.to_dict() or {} for doc in docs if doc.exists}
         except Exception as e:
             logger.error(f"Error fetching hotels: {str(e)}")
@@ -178,7 +186,7 @@ class HotelRepository(BaseRepository):
         """Kiểm tra xem tất cả place_ids có tồn tại trong database hay không."""
         return [
             doc.id
-            async for doc in self._get_db().get_all(
+            async for doc in self._db.get_all(
                 [self._collection.document(pid) for pid in place_ids]
             )
             if doc.exists
