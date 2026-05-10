@@ -9,18 +9,16 @@ from schemas.collection_schema import CollectionCreateRequest, CollectionVisibil
 from firebase_admin import auth
 
 class AuthenticationService:
-    def __init__(self, token: str) -> None:
-        self.token = token
+    def __init__(self, uid: str, email: str) -> None:
+        self.uid = uid
+        self.email = email
 
     async def authenticate_user(self) -> ResponseSchema[AuthResponse]:
         # 1. Giải mã và xác thực Token từ Firebase
-        decoded_info = self._verify_token()
-        uid = decoded_info['uid']
-        email = decoded_info.get('email')
 
         try:
             # 2. Kiểm tra user đã tồn tại chưa
-            user = await user_repo.get_user(uid)
+            user = await user_repo.get_user(self.uid)
 
             if not user:
                 # --- TRƯỜNG HỢP TẠO MỚI ---
@@ -36,7 +34,7 @@ class AuthenticationService:
                     visibility=CollectionVisibility.PRIVATE,
                     thumbnail_url=None
                 )
-                new_collection = await collection_repo.create_collection(uid, liked_req.model_dump())
+                new_collection = await collection_repo.create_collection(self.uid, liked_req.model_dump())
 
                 if not new_collection or not new_collection.get("id"):
                     raise AppException(status_code=500, message="Failed to initialize user data")
@@ -45,11 +43,11 @@ class AuthenticationService:
 
                 # 5. Lưu User mới với đầy đủ thông tin
                 user_data = {
-                    "uid": uid,
+                    "uid": self.uid,
                     "username": username,
                     "username_lower": username.lower(),  # Dùng để tìm kiếm không phân biệt hoa thường
                     "display_name": self._generate_display_name(),
-                    "email": email,
+                    "email": self.email,
                     "liked_collection": liked_collection_id, # Lưu ID vào user theo yêu cầu
                     "created_at": datetime.now(timezone.utc),
                     "last_login": datetime.now(timezone.utc)
@@ -63,17 +61,17 @@ class AuthenticationService:
                 
                 # 6. Cập nhật last_login
                 update_data = {"last_login": datetime.now(timezone.utc)}
-                await user_repo.update_user(uid, update_data)
+                await user_repo.update_user(self.uid, update_data)
 
             # 7. Trả về ResponseSchema bọc AuthResponse
             return ResponseSchema(
                 status_code=200,
                 message="Success",
                 data=AuthResponse(
-                    uid=uid,
+                    uid=self.uid,
                     username=user.get("username", ""),
                     display_name=user.get("display_name", ""),
-                    email=user.get("email")
+                    email=self.email
                 )
             )
 
@@ -97,10 +95,3 @@ class AuthenticationService:
 
     def _generate_display_name(self) -> str:
         return f"Booking4U {uuid.uuid4().hex[:6]}"
-
-    def _verify_token(self) -> dict:
-        try:
-            # Sử dụng firebase_admin.auth để xác thực toke
-            return auth.verify_id_token(self.token)
-        except Exception as e:
-            raise AppException(status_code=401, message=f"Failed to verify token: {str(e)}")
