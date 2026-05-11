@@ -15,6 +15,7 @@ from api.conversation import conversation_router
 from api.trip import trip_router
 from api.view import view_router
 from api.upload import upload_router
+from api.user_travel_preference import user_travel_preference_router
 from core.database import firebase_manager
 from core.exceptions import AppException
 from core.limiter import limiter, AutoRateLimitMiddleware
@@ -92,6 +93,7 @@ app.include_router(conversation_router, tags=["conversation"])
 app.include_router(trip_router, tags=["trip"])
 app.include_router(view_router, tags=["view"])
 app.include_router(upload_router, tags=["upload"])
+app.include_router(user_travel_preference_router, tags=["user_preference"])
 # Xử lý các lỗi
 @app.exception_handler(AppException) # Xử lý lỗi ứng dụng
 async def app_exception_handler(request: Request, exc: AppException):

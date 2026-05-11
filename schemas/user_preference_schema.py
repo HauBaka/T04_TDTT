@@ -30,12 +30,6 @@ class UserTravelPreference(BaseModel):
     disliked_location_tags: list[str] = Field(default_factory=list)
     notes: str | None = None
 
-# Schema lưu trữ hồ sơ du lịch của người dùng
-class UserProfileSchema(BaseModel):
-    uid: str
-    travel_profile: UserTravelPreference | None = None
-    survey_updated_at: datetime | None = None
-
 # Schema lưu trữ các sự kiện hành vi của người dùng
 class UserBehaviorEvent(BaseModel):
     event_type: UserEventType
