@@ -28,6 +28,7 @@ from schemas.user_preference_schema import (
 )
 from repositories.user_repo import user_repo
 from services.semantic_encoder import semantic_text_encoder
+from services.user_travel_preference_service import user_travel_preference_service
 
 # Map tiếng anh sang tiếng việt (nếu đầu vào lỡ tiếng anh)
 SINH_NGHIA_MAP = {
@@ -914,14 +915,13 @@ class HotelRankingService:
                 if not private_user:
                     private_user = {}
 
-                profile_data = private_user.get("travel_profile")
-                if isinstance(profile_data, UserTravelPreference):
-                    profile = profile_data
-                elif isinstance(profile_data, dict):
-                    try:
-                        profile = UserTravelPreference.model_validate(profile_data)
-                    except Exception:
-                        profile = UserTravelPreference()
+                # Fetch travel preference từ dedicated service
+                try:
+                    preference_response = await user_travel_preference_service.get_my_travel_preference(requester_uid)
+                    if preference_response.data:
+                        profile = preference_response.data.preference
+                except Exception:
+                    profile = UserTravelPreference()
 
                 collection_data = private_user.get("collections", [])
                 if isinstance(collection_data, list):

@@ -8,7 +8,7 @@ class UserTravelPreferenceRepository(BaseRepository):
     """Repository quản lý dữ liệu UserTravelPreference của người dùng."""
 
     def __init__(self):
-        super().__init__("users-travel-preferences")
+        super().__init__("users")
 
     async def get_user_travel_preference(self, uid: str) -> UserTravelPreference | None:
         """TODO: Lấy travel preference của một người dùng theo uid."""
@@ -23,7 +23,7 @@ class UserTravelPreferenceRepository(BaseRepository):
         raise NotImplementedError()
 
     async def delete_user_travel_preference(self, uid: str) -> bool:
-        """TODO: Xóa travel preference của người dùng."""
+        """TODO: Xóa travel preference của một người dùng."""
         raise NotImplementedError()
 
 
