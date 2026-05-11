@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
-from uuid import UUID, uuid4
-
 from pydantic import BaseModel, Field
 
 # Mức độ chịu đựng thời tiết xấu của người dùng
@@ -32,7 +30,7 @@ class UserTravelPreference(BaseModel):
 
 # Schema lưu trữ các sự kiện hành vi của người dùng
 class UserBehaviorEvent(BaseModel):
-    id: UUID = Field(default_factory=uuid4)
+    id: str
     user_id: str
     event_type: UserEventType
     target_id: str | None = None

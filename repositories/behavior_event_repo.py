@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-from typing import Iterable, Protocol
+from typing import Iterable
+
+from repositories.base_repo import BaseRepository
 
 from schemas.user_preference_schema import UserBehaviorEvent
 
 
-class BehaviorEventRepo(Protocol):
+class BehaviorEventRepo(BaseRepository):
+
     """Interface tối thiểu cho persistence layer của behavior events."""
 
     def create_event(self, event: UserBehaviorEvent) -> str:
@@ -22,9 +25,9 @@ class BehaviorEventRepo(Protocol):
         """Lấy một event cụ thể theo ID."""
         raise NotImplementedError
 
-    def delete_event(self, event_id: str) -> bool:
-        """Xóa event theo ID."""
-        raise NotImplementedError
+    def delete_events(self, event_ids: list[str]) -> int:
+            """Xóa nhiều event theo danh sách ID."""
+            raise NotImplementedError
 
     def count_events_for_user(self, user_id: str) -> int:
         """Đếm tổng số events của user."""

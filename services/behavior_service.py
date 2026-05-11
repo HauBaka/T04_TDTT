@@ -20,7 +20,6 @@ class BehaviorService:
         target_id: str | None = None,
         target_name: str | None = None,
         metadata: dict[str, str] | None = None,
-        session_id: str | None = None,
         source: str | None = None,
     ) -> str:
         """TODO: Ghi nhận một sự kiện hành vi của người dùng."""
