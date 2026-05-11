@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
-from schemas.collection_schema import CollectionPrivate, CollectionPublic
+from schemas.collection_schema import CollectionPublic
 from schemas.user_preference_schema import ScoringWeights, UserBehaviorEvent, UserTravelPreference
 
 
@@ -15,8 +15,6 @@ class UserSchema(BaseModel):
     
     # Các trường thông tin cá nhân khác có thể thêm vào đây
     travel_profile: UserTravelPreference | None = None
-    collections: list[CollectionPublic] = Field(default_factory=list)
-    user_behavior_history: list[UserBehaviorEvent] = Field(default_factory=list)
     scoring_weights: ScoringWeights | None = None
 
 # Không cần chỉnh bật/tắt field vì phức tạp quá
@@ -36,8 +34,6 @@ class UserPrivate(UserPublic):
     last_updated: datetime | None = None
     # Các trường thông tin cá nhân khác có thể thêm vào đây
     travel_profile: UserTravelPreference | None = None
-    collections: list[CollectionPrivate] = Field(default_factory=list)
-    user_behavior_history: list[UserBehaviorEvent] = Field(default_factory=list)
     scoring_weights: ScoringWeights | None = None
 
 class UserResponse(BaseModel):

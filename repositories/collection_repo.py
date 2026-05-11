@@ -330,5 +330,19 @@ class CollectionRepository(BaseRepository):
         collection_data["id"] = ref.id
         return collection_data
 
+    async def get_owned_collections(self, owner_uid: str, limit: int = 50) -> list[dict]:
+        """Lấy danh sách collection public/private của user theo owner_uid."""
+        try:
+            docs = await self._collection.where("owner_uid", "==", owner_uid).limit(limit).get()
+            result: list[dict] = []
+            for doc in docs:
+                if doc and hasattr(doc, "to_dict"):
+                    data = doc.to_dict() or {}
+                    data["id"] = doc.id
+                    result.append(data)
+            return result
+        except Exception:
+            return []
+
 
 collection_repo = CollectionRepository()

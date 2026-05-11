@@ -27,7 +27,9 @@ from schemas.user_preference_schema import (
     WeatherTolerance,
 )
 from repositories.user_repo import user_repo
+from repositories.collection_repo import collection_repo
 from services.semantic_encoder import semantic_text_encoder
+from services.behavior_service import behavior_service
 
 # Map tiếng anh sang tiếng việt (nếu đầu vào lỡ tiếng anh)
 SINH_NGHIA_MAP = {
@@ -913,31 +915,26 @@ class HotelRankingService:
                     except Exception:
                         profile = UserTravelPreference()
 
-                collection_data = private_user.get("collections", [])
-                if isinstance(collection_data, list):
+                # Fetch collections from collection repository
+                try:
+                    repo_cols = await collection_repo.get_owned_collections(requester_uid, limit=30)
                     parsed_collections: list[CollectionPublic] = []
-                    for item in collection_data:
-                        if isinstance(item, CollectionPublic):
-                            parsed_collections.append(item)
-                        elif isinstance(item, dict):
-                            try:
-                                parsed_collections.append(CollectionPublic.model_validate(item))
-                            except Exception:
-                                continue
-                    collections = parsed_collections[:50]
+                    for c in repo_cols:
+                        try:
+                            parsed_collections.append(CollectionPublic.model_validate(c))
+                        except Exception:
+                            continue
+                    collections = parsed_collections
+                except Exception as exc:
+                    logger.warning(f"Failed to fetch collections for {requester_uid}: {str(exc)}")
+                    collections = []
 
-                history_data = private_user.get("user_behavior_history", [])
-                if isinstance(history_data, list):
-                    parsed_history: list[UserBehaviorEvent] = []
-                    for event in history_data:
-                        if isinstance(event, UserBehaviorEvent):
-                            parsed_history.append(event)
-                        elif isinstance(event, dict):
-                            try:
-                                parsed_history.append(UserBehaviorEvent.model_validate(event))
-                            except Exception:
-                                continue
-                    history = parsed_history[:100]
+                # Fetch user behavior history from behavior_service
+                try:
+                    history = behavior_service.get_recent_events(requester_uid, limit=30)
+                except Exception as exc:
+                    logger.warning(f"Failed to fetch behavior history for {requester_uid}: {str(exc)}")
+                    history = []
 
                 weight_data = private_user.get("scoring_weights")
                 if isinstance(weight_data, ScoringWeights):
