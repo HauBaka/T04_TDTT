@@ -14,11 +14,10 @@ class WeatherTolerance(str, Enum):
 # Các sự kiện hành vi của người dùng có thể ghi nhận để cải thiện cá nhân hóa
 class UserEventType(str, Enum):
     VIEW = "xem"
-    CLICK = "nhan"
-    SAVE = "luu"
-    REMOVE = "xoa"
-    BOOK = "dat_phong"
-    RATE = "danh_gia"
+    SAVE_PLACE = "luu_place"
+    REMOVE_PLACE = "xoa_place"
+    SAVE_COLLECTION = "luu_collection"
+    REMOVE_COLLECTION = "xoa_collection"
 
 # Schema lưu trữ sở thích bền vững của người dùng (lấy từ form)
 class UserTravelPreference(BaseModel):
@@ -30,20 +29,12 @@ class UserTravelPreference(BaseModel):
     disliked_location_tags: list[str] = Field(default_factory=list)
     notes: str | None = None
 
-# Schema lưu trữ hồ sơ du lịch của người dùng
-class UserProfileSchema(BaseModel):
-    uid: str
-    travel_profile: UserTravelPreference | None = None
-    survey_updated_at: datetime | None = None
-
 # Schema lưu trữ các sự kiện hành vi của người dùng
 class UserBehaviorEvent(BaseModel):
     event_type: UserEventType
-    hotel_id: str | None = None
-    hotel_name: str | None = None
-    collection_id: str | None = None
+    target_id: str | None = None
+    target_name: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    value: float | None = None
     metadata: dict[str, str] = Field(default_factory=dict)
 
 # Trọng số các yếu tố khi tính điểm cá nhân hóa

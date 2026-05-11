@@ -145,8 +145,6 @@ class HotelSignal:
 
 # Dịch vụ xếp hạng khách sạn dựa trên nhiều tín hiệu: đánh giá thực tế, sự phù hợp với hồ sơ người dùng, sự liên quan đến bộ sưu tập đã lưu, lịch sử tương tác, và sự phù hợp với điều kiện thời tiết dự kiến.
 class HotelRankingService:
-    SINH_NGHIA = SINH_NGHIA_MAP
-
     # Nhóm đồng nghĩa tiện ích ưu tiên cách gọi tiếng Việt.
     AMENITY_SYNONYMS: dict[str, set[str]] = {
         "wifi": {"wi fi", "mang", "mang khong day", "wifi mien phi", "internet"},
@@ -171,11 +169,10 @@ class HotelRankingService:
     # Trọng số mặc định cho từng loại sự kiện hành vi của người dùng, dùng để điều chỉnh điểm cá nhân hóa dựa trên mức độ tương tác.
     EVENT_WEIGHTS = {
         UserEventType.VIEW: 0.10,
-        UserEventType.CLICK: 0.25,
-        UserEventType.SAVE: 0.60,
-        UserEventType.BOOK: 1.00,
-        UserEventType.RATE: 0.75,
-        UserEventType.REMOVE: -0.40,
+        UserEventType.SAVE_PLACE: 0.60,
+        UserEventType.REMOVE_PLACE: -0.40,
+        UserEventType.SAVE_COLLECTION: 0.50,
+        UserEventType.REMOVE_COLLECTION: -0.30,
     }
     
     # Tính chất chuyến đi của người dùng
@@ -460,7 +457,7 @@ class HotelRankingService:
         semantic_score = self._semantic_similarity(self._collections_semantic_text(collections), signal.semantic_text)
         return self._blend_rule_and_semantic(rule_score, semantic_score)
     
-    # Chấm mức hợp với lịch sử xem/lưu/đặt phòng trước đó.
+    # Chấm mức hợp với lịch sử xem/lưu/xóa place hoặc collection.
     def _history_affinity_score(self, signal: HotelSignal, history: list[UserBehaviorEvent]) -> float:
         if not history:
             return 0.5
@@ -473,13 +470,13 @@ class HotelRankingService:
             if base_weight == 0.0:
                 continue
 
-            event_identity = self._normalize_token(event.hotel_id or event.hotel_name or "")
+            event_identity = self._normalize_token(event.target_id or event.target_name or "")
             if event_identity and event_identity == signal.identity:
                 match_score = 1.0
             else:
                 event_tokens = self._event_tokens(event)
                 match_score = self._jaccard(event_tokens, signal.feature_tokens)
-                if event.hotel_name and self._normalize_token(event.hotel_name) == self._normalize_token(signal.hotel.name):
+                if event.target_name and self._normalize_token(event.target_name) == self._normalize_token(signal.hotel.name):
                     match_score = max(match_score, 0.85)
 
             recency = self._recency_weight(event.created_at)
@@ -541,11 +538,11 @@ class HotelRankingService:
     def _confidence_score(self, hotel: DiscoverHotel) -> float:
         sentiment = hotel.ai_sentiment
         ai_score = sentiment.ai_score if sentiment and sentiment.ai_score is not None else 0.0
-        analyzed_reviews = sentiment.analyzed_reviews if sentiment else []
+        user_reviews = hotel.user_reviews
         trust_weight = sentiment.trust_weight if sentiment else 0.0
-        review_density = min(1.0, len(analyzed_reviews) / 8.0)
+        review_density = min(1.0, len(user_reviews) / 8.0)
         trust = self._clamp(trust_weight, 0.0, 1.0)
-        if ai_score <= 0 and not analyzed_reviews:
+        if ai_score <= 0 and not user_reviews:
             return 0.55
         return self._clamp(0.55 + 0.25 * trust + 0.20 * review_density, 0.0, 1.0)
     
@@ -621,8 +618,8 @@ class HotelRankingService:
 
     def _event_tokens(self, event: UserBehaviorEvent) -> set[str]:
         # Lấy token từ một sự kiện hành vi.
-        tokens = set(self._tokenize(event.hotel_name or ""))
-        tokens.update(self._tokenize(event.hotel_id or ""))
+        tokens = set(self._tokenize(event.target_name or ""))
+        tokens.update(self._tokenize(event.target_id or ""))
         tokens.update(self._tokenize(" ".join(event.metadata.values())))
         return tokens
 
@@ -702,11 +699,6 @@ class HotelRankingService:
                 alias_index[token] = set(combined)
         return alias_index
 
-    # Kiểm tra source có đủ toàn bộ từ khóa hay không.
-    def _contains_all(self, keywords: Iterable[str], source: Iterable[str]) -> bool:
-        source_tokens = {self._normalize_token(item) for item in source}
-        return all(self._normalize_token(item) in source_tokens for item in keywords)
-
     # Kiểm tra source có chứa ít nhất một từ khóa hay không.
     def _contains_any(self, keywords: Iterable[str], source: Iterable[str]) -> bool:
         source_tokens = {self._normalize_token(item) for item in source}
@@ -722,7 +714,6 @@ class HotelRankingService:
         intersection = left_set.intersection(right_set)
         return len(intersection) / len(union)
     
-    # hàm này để làm gì? hả
     # Hàm này tính trọng số giảm dần theo thời gian cho các sự kiện hành vi của người dùng, để các tương tác gần đây có ảnh hưởng lớn hơn đến điểm lịch sử.
     def _recency_weight(self, when: datetime) -> float:
         if when.tzinfo is None:
@@ -855,9 +846,8 @@ class HotelRankingService:
                     piece
                     for piece in [
                         f"su_kien: {event.event_type.value}",
-                        f"ten_khach_san: {event.hotel_name or ''}",
-                        f"hotel_id: {event.hotel_id or ''}",
-                        f"gia_tri: {event.value if event.value is not None else ''}",
+                        f"ten_muc_tieu: {event.target_name or ''}",
+                        f"target_id: {event.target_id or ''}",
                         f"ghi_chu: {'; '.join(event.metadata.values())}",
                     ]
                     if piece
