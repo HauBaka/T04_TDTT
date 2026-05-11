@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Iterable
 
 from repositories.behavior_event_repo import behavior_event_repo
-from schemas.user_preference_schema import UserBehaviorEvent, UserEventType
+from schemas.user_behavior_schema import UserBehaviorEvent, UserEventType
 
 
 class BehaviorService:

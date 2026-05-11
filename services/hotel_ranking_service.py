@@ -19,10 +19,9 @@ from schemas.hotel_ranking_schema import (
     HotelRankingResponse,
 )
 from schemas.trip_context_schema import TripSearchCriteria, TravelStyle
+from schemas.user_behavior_schema import UserBehaviorEvent, UserEventType
 from schemas.user_preference_schema import (
     ScoringWeights,
-    UserBehaviorEvent,
-    UserEventType,
     UserTravelPreference,
     WeatherTolerance,
 )

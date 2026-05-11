@@ -5,11 +5,8 @@ from pydantic import BaseModel, Field
 from schemas.collection_schema import CollectionPublic
 from schemas.discover_schema import DiscoverHotel, WeatherInfo
 from schemas.trip_context_schema import TripSearchCriteria
-from schemas.user_preference_schema import (
-    ScoringWeights,
-    UserBehaviorEvent,
-    UserTravelPreference,
-)
+from schemas.user_behavior_schema import UserBehaviorEvent
+from schemas.user_preference_schema import ScoringWeights, UserTravelPreference
 
 class HotelRankingRequest(BaseModel):
     hotels: list[DiscoverHotel]

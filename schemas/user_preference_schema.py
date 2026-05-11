@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from enum import Enum
 from pydantic import BaseModel, Field
 
@@ -9,14 +8,6 @@ class WeatherTolerance(str, Enum):
     LOW = "thap"
     MEDIUM = "trung_binh"
     HIGH = "cao"
-
-# Các sự kiện hành vi của người dùng có thể ghi nhận để cải thiện cá nhân hóa
-class UserEventType(str, Enum):
-    VIEW = "xem"
-    SAVE_PLACE = "luu_place"
-    REMOVE_PLACE = "xoa_place"
-    SAVE_COLLECTION = "luu_collection"
-    REMOVE_COLLECTION = "xoa_collection"
 
 # Schema lưu trữ sở thích bền vững của người dùng (lấy từ form)
 class UserTravelPreference(BaseModel):
@@ -27,16 +18,6 @@ class UserTravelPreference(BaseModel):
     preferred_location_tags: list[str] = Field(default_factory=list)
     disliked_location_tags: list[str] = Field(default_factory=list)
     notes: str | None = None
-
-# Schema lưu trữ các sự kiện hành vi của người dùng
-class UserBehaviorEvent(BaseModel):
-    id: str
-    user_id: str
-    event_type: UserEventType
-    target_id: str | None = None
-    target_name: str | None = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    metadata: dict[str, str] = Field(default_factory=dict)
 
 # Trọng số các yếu tố khi tính điểm cá nhân hóa
 class ScoringWeights(BaseModel):

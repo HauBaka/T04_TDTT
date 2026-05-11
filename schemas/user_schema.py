@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
 from schemas.collection_schema import CollectionPublic
-from schemas.user_preference_schema import ScoringWeights, UserBehaviorEvent, UserTravelPreference
+from schemas.user_preference_schema import ScoringWeights, UserTravelPreference
 
 
 class UserSchema(BaseModel):

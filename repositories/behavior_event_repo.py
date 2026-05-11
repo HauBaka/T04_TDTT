@@ -4,7 +4,7 @@ from typing import Iterable
 
 from repositories.base_repo import BaseRepository
 
-from schemas.user_preference_schema import UserBehaviorEvent
+from schemas.user_behavior_schema import UserBehaviorEvent
 
 
 class BehaviorEventRepo(BaseRepository):
