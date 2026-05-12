@@ -2,6 +2,7 @@ from core.exceptions import ConflictError, NotFoundError
 from repositories.user_repo import user_repo
 from repositories.collection_repo import collection_repo
 from schemas.user_schema import UserPublic, UserPrivate
+from schemas.user_preference_schema import UserTravelPreferenceResponse, UserTravelPreference, UserTravelPreferenceUpdateRequest
 from schemas.response_schema import ResponseSchema
 
 ALLOWED_UPDATE_FIELDS = {"display_name", "username", "email", "phone_number", "bio", "avatar_url"}
@@ -76,5 +77,21 @@ class UserService:
             "owned": owned_collections,
             "collaborated": collaborated_collections
         })
+
+    async def get_travel_preference(self, uid: str) -> ResponseSchema[UserTravelPreferenceResponse]:
+        """TODO: Lấy travel preference của user."""
+        raise NotImplementedError()
+
+    async def update_travel_preference(
+        self,
+        uid: str,
+        preference: UserTravelPreferenceUpdateRequest,
+    ) -> ResponseSchema[UserTravelPreferenceResponse]:
+        """TODO: Tạo mới/cập nhật travel preference cho user."""
+        raise NotImplementedError()
+
+    async def delete_travel_preference(self, uid: str) -> ResponseSchema[bool]:
+        """TODO: Xóa travel preference của user."""
+        raise NotImplementedError()
 
 user_service = UserService()
