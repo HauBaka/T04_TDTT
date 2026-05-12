@@ -7,37 +7,12 @@ from repositories.notification_repo import notification_repo
 class NotificationService:
     def __init__(self):
         self.notification_repository = notification_repo
-
-    async def get_notifications_for_user(self, user_id: str) -> ResponseSchema[list[NotificationResponse]]:
-        """Lấy danh sách thông báo cho một người dùng."""
-        # Get from database
-        notifications_data = await self.notification_repository.get_by_user_id(user_id)
-        
-        # Convert to response objects
-        notifications = [
-            NotificationResponse(
-                id=n.get("id"),
-                send_at=n.get("send_at", datetime.now(timezone.utc)),
-                type=NotificationType(n.get("type")),
-                content=n.get("content"),
-                read=n.get("read", False),
-                ref_id=n.get("ref_id"),
-                actor_id=n.get("actor_id")
-            )
-            for n in notifications_data
-        ]
-        
-        return ResponseSchema[list[NotificationResponse]](
-            status_code=200,
-            message="Notifications retrieved successfully",
-            data=notifications
-        )
     
     async def create_notification(self, user_id: str, notification_data: dict) -> ResponseSchema[NotificationResponse]:
         """Tạo một thông báo mới."""
         # Prepare data for database
         notification_db_data = {
-            "user_id": user_id,
+            "receiver_id": user_id,
             "send_at": datetime.now(timezone.utc),
             "type": notification_data.get("type"),
             "content": notification_data.get("content"),
@@ -58,13 +33,19 @@ class NotificationService:
             raise NotFoundError("Notification not found.")
         
         # Check permission - only the recipient can update
-        if user_id != notification.get("user_id"):
+        if user_id != notification.get("receiver_id"):
             raise AppException(status_code=403, message="You do not have permission to update this notification.")
+        
+        if update_request.read is False:
+            raise AppException(status_code=400, message="Cannot update notification to unread.")
+        
+        if notification.get("read") is True:
+            raise AppException(status_code=400, message="Notification is already marked as read.")
         
         # Update in database
         update_data = {
             "read": update_request.read
-}
+        }
         updated_notification = await self.notification_repository.update(notification_id, update_data)
         
         return self.build_notification_response(updated_notification, status_code=200, message="Notification updated successfully")
@@ -77,7 +58,7 @@ class NotificationService:
             raise NotFoundError("Notification not found.")
         
         # Check permission - only the recipient can delete
-        if user_id != notification.get("user_id"):
+        if user_id != notification.get("receiver_id"):
             raise AppException(status_code=403, message="You do not have permission to delete this notification.")
         
         # Delete from database

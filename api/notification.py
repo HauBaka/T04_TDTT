@@ -7,11 +7,6 @@ from schemas.notification_schema import NotificationResponse, UpdateNotification
 
 notification_router = APIRouter()
 
-@notification_router.get("/users/me/notifications", response_model=ResponseSchema[list[NotificationResponse]])
-async def get_notifications(requester=Depends(get_current_user(optional=False))):
-    """Lấy danh sách thông báo của người dùng hiện tại."""
-    return await notification_service.get_notifications_for_user(requester.get("uid"))
-
 @notification_router.patch("/users/me/notifications/{notification_id}", response_model=ResponseSchema[NotificationResponse])
 async def update_notification(notification_id: str, update_request: UpdateNotificationRequest, requester=Depends(get_current_user(optional=False))):
     """Cập nhật trạng thái của một thông báo cụ thể (ví dụ: đánh dấu đã đọc)."""
@@ -21,4 +16,3 @@ async def update_notification(notification_id: str, update_request: UpdateNotifi
 async def delete_notification(notification_id: str, requester=Depends(get_current_user(optional=False))):
     """Xóa một thông báo cụ thể."""
     return await notification_service.delete_notification(notification_id, requester.get("uid"))
-

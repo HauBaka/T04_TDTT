@@ -1,11 +1,15 @@
+from fastapi import BackgroundTasks
 from datetime import datetime, timezone
 from core.exceptions import NotFoundError, AppException
 from repositories.invitation_repo import invitation_repo
 from repositories.user_repo import user_repo
+from schemas.conversation_schema import ConversationRole
 from schemas.invitation_schema import InvitationCreateRequest, InvitationResponse, InvitationStatus, InvitationType, InvitationUpdateRequest
 from schemas.response_schema import ResponseSchema
 from services.collection_service import collection_service
 from repositories.collection_repo import collection_repo
+from services.conversation_service import conversation_service
+from repositories.conversation_repo import conversation_repo
 
 class InvitationService:
     def __init__(self):
@@ -13,14 +17,10 @@ class InvitationService:
 
     async def create_invitation(self, sender_uid: str, invitation_request: InvitationCreateRequest) -> ResponseSchema[InvitationResponse]:
         """Tạo một lời mời mới."""
-        # Check target user exists
-        target_user = await user_repo.get_user(invitation_request.target_uid)
-        if not target_user:
+        users = await user_repo.get_users([sender_uid, invitation_request.target_uid])
+        if invitation_request.target_uid not in users:
             raise NotFoundError("Target user not found.")
-        
-        # Check sender user exists
-        sender = await user_repo.get_user(sender_uid)
-        if not sender:
+        if sender_uid not in users:
             raise NotFoundError("Sender user not found.")
         
         # Create invitation data
@@ -40,20 +40,7 @@ class InvitationService:
             
         return self.build_invitation_response(invitation_data, status_code=201, message="Invitation created successfully")
 
-    async def get_invitation(self, invitation_id: str, requester_uid: str) -> ResponseSchema[InvitationResponse]:
-        """Lấy thông tin của một lời mời cụ thể."""
-        # Get invitation from database
-        invitation = await self.invitation_repo.get_by_id(invitation_id)
-        if not invitation:
-            raise NotFoundError("Invitation not found.")
-        
-        # Check permission - only sender or target can view
-        if requester_uid != invitation.get("sender_uid") and requester_uid != invitation.get("target_uid"):
-            raise AppException(status_code=403, message="You do not have permission to view this invitation.")
-        
-        return self.build_invitation_response(invitation, status_code=200, message="Invitation retrieved successfully")
-
-    async def update_invitation(self, invitation_id: str, requester_uid: str, invitation_update: InvitationUpdateRequest) -> ResponseSchema[InvitationResponse]:
+    async def update_invitation(self, invitation_id: str, requester_uid: str, invitation_update: InvitationUpdateRequest, background_tasks: BackgroundTasks) -> ResponseSchema[InvitationResponse]:
         """Cập nhật trạng thái của một lời mời cụ thể."""
         # Get invitation from database
         invitation = await self.invitation_repo.get_by_id(invitation_id)
@@ -63,6 +50,9 @@ class InvitationService:
         # Check permission - only target user can accept/decline
         if requester_uid != invitation.get("target_uid"):
             raise AppException(status_code=403, message="Only target user can update invitation status.")
+        
+        if invitation.get("status") != InvitationStatus.PENDING.value:
+            raise AppException(status_code=400, message="Only pending invitations can be updated.")
         
         # Update status in database
         update_data = {
@@ -77,9 +67,30 @@ class InvitationService:
             if invitation.get("type") == InvitationType.COLLECTION.value:
                 await collection_repo.add_collaborators_to_collection(
                     collection_id=updated_invitation.get("ref_id"),
-                    requester_id=updated_invitation.get("sender_uid"),
                     collaborator_uids=[requester_uid]
                 )
+            
+            elif invitation.get("type") == InvitationType.CONVERSATION.value:
+                await conversation_repo.add_members(
+                    conversation_id=updated_invitation.get("ref_id"),
+                    member_uids=[requester_uid],
+                    roles=[ConversationRole.MEMBER.value]
+                )
+                conversation_data = await conversation_repo.get_by_id(updated_invitation.get("ref_id"))
+                # Tạo tóm tắt hội thoại cho người dùng mới này
+                summary = {
+                    "id": conversation_data.get("id"),
+                    "name": conversation_data.get("name"),
+                    "unread_count": 0,
+                    "updated_at": datetime.now(timezone.utc)
+                }
+                background_tasks.add_task(
+                    self.conversation_repository.upsert_user_conversation_summary, 
+                    requester_uid, updated_invitation.get("ref_id"), summary
+                )
+        
+        elif invitation_update.status == InvitationStatus.DECLINED:
+            pass
 
         return self.build_invitation_response(updated_invitation, status_code=200, message="Invitation updated successfully")
     

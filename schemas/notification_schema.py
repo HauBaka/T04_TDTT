@@ -11,6 +11,7 @@ class NotificationType(str, Enum):
 
 class NotificationResponse(BaseModel):
     id: str
+    receiver_id: str
     send_at: datetime
     type: NotificationType
     content: str

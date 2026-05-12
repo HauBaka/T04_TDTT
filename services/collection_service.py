@@ -8,7 +8,7 @@ from repositories.collection_repo import collection_repo
 from core.exceptions import AppException, NotFoundError
 from schemas.response_schema import ResponseSchema
 from services.invitation_service import invitation_service
-from schemas.invitation_schema import InvitationType
+from schemas.invitation_schema import InvitationType, InvitationStatus
 from services.notification_service import notification_service
 from schemas.notification_schema import NotificationType
 
@@ -147,25 +147,35 @@ class CollectionService:
             if not_found_uids:
                 raise NotFoundError(f"Users {not_found_uids} not found.")
         
+        batch = collection_repo._get_db().batch()
+        timestamp = datetime.now(timezone.utc)
+       
         for target_uid in collaborator_uids:
             invitation_data = {
                 "sender_uid": requester_id,
                 "target_uid": target_uid,
                 "type": InvitationType.COLLECTION.value,
-                "ref_id": collection_id
+                "ref_id": collection_id,
+                "status": InvitationStatus.PENDING.value,
+                "created_at": timestamp
             }
-            await invitation_service.create_invitation(invitation_data)
+            invitation_ref = collection_repo._get_db().collection("invitations").document()
+            batch.set(invitation_ref, invitation_data)
 
-            await notification_service.create_notification(
-                user_id=target_uid,
-                notification_data={
-                    "type": NotificationType.COLLABORATION_INVITE.value,
-                    "content": f"You have been invited to collaborate on collection '{collection.get('name', '')}' by user {requester_id}.",
-                    "ref_id": collection_id,
-                    "actor_id": requester_id
-                }
-            )
-            
+            notification_data = {
+                "receiver_id": target_uid,
+                "send_at": timestamp,
+                "type": NotificationType.INVITATION.value,
+                "content": f"You have been invited to collaborate on collection '{collection.get('name', '')}' by user {requester_id}.",
+                "read": False,
+                "ref_id": collection_id,
+                "actor_id": requester_id
+            }
+            notification_ref = collection_repo._get_db().collection("notifications").document()
+            batch.set(notification_ref, notification_data)
+
+        # Commit batch
+        await batch.commit()
         return await self.build_response(collection)
 
     async def remove_collaborators_from_collection(self, collection_id: str, requester_id: str, collaborator_uids: list[str]) -> ResponseSchema[CollectionResponse]:
@@ -190,16 +200,25 @@ class CollectionService:
             raise AppException(status_code=500, message="Failed to remove collaborators from collection.")
         
         collection_name = collection.get("name", "")
+        
+        batch = collection_repo._get_db().batch()
+        timestamp = datetime.now(timezone.utc)
+       
         for target_uid in collaborator_uids:
-            await notification_service.create_notification(
-                user_id=target_uid,
-                notification_data={
-                    "type": NotificationType.COLLABORATION_REMOVAL.value,
-                    "content": f"You have been removed from collaborating on collection '{collection_name}' by user {requester_id}.",
-                    "ref_id": collection_id,
-                    "actor_id": requester_id
-                }
-            )
+            notification_data = {
+                "receiver_id": target_uid,
+                "send_at": timestamp,
+                "type": NotificationType.COLLECTION_UPDATE.value,
+                "content": f"You have been removed from collaborating on collection '{collection_name}' by user {requester_id}.",
+                "read": False,
+                "ref_id": collection_id,
+                "actor_id": requester_id
+            }
+            notification_ref = collection_repo._get_db().collection("notifications").document()
+            batch.set(notification_ref, notification_data)
+
+        # Commit batch
+        await batch.commit()
 
         return await self.build_response(updated_collection)
     

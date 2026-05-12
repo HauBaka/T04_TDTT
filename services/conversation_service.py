@@ -8,6 +8,10 @@ from repositories.conversation_repo import conversation_repo
 from schemas.conversation_schema import ConversationResponse, ConversationCreateRequest, ConversationUpdateRequest, AddMembersRequest, SendMessageRequest, ConversationRole, ConversationMember
 from schemas.response_schema import ResponseSchema
 from core.exceptions import AppException, NotFoundError, PermissionDeniedError
+from schemas.notification_schema import NotificationType
+from services.notification_service import notification_service
+from schemas.invitation_schema import InvitationType, InvitationStatus
+from services.invitation_service import invitation_service
 
 class ConversationService:
     def __init__(self):
@@ -114,25 +118,53 @@ class ConversationService:
             raise AppException(message="All provided UIDs are already members of the conversation", status_code=400)
 
         # Gọi Repo cập nhật mảng + thêm sub-collection members
-        updated_conv = await self.conversation_repository.add_members(conversation_id, new_uids, [ConversationRole.MEMBER] * len(new_uids))
-        if not updated_conv:
-            raise AppException(message="Failed to update conversation", status_code=500)
-        
+        # updated_conv = await self.conversation_repository.add_members(conversation_id, new_uids, [ConversationRole.MEMBER] * len(new_uids))
+        # if not updated_conv:
+        #    raise AppException(message="Failed to update conversation", status_code=500)
+        # Gửi lời mời rồi mới thêm vào conversation
         # Tạo tóm tắt hội thoại cho những thành viên mới này
-        summary = {
-            "id": conversation_id,
-            "name": updated_conv.get("name"),
-            "unread_count": 0,
-            "updated_at": datetime.now(timezone.utc)
-        }
+        # summary = {
+        #     "id": conversation_id,
+        #     "name": updated_conv.get("name"),
+        #     "unread_count": 0,
+        #     "updated_at": datetime.now(timezone.utc)
+        # }
+
+        batch = self.conversation_repository._get_db().batch()
+        timestamp = datetime.now(timezone.utc)
+
         for uid in new_uids: # chạy ngầm task này
+            invitation_data = {
+                "sender_uid": requester_uid,
+                "target_uid": uid,
+                "type": InvitationType.CONVERSATION.value,
+                "ref_id": conversation_id,
+                "status": InvitationStatus.PENDING.value,
+                "created_at": timestamp
+            }
+            invitation_ref = self.conversation_repository._get_db().collection("invitations").document()
+            batch.set(invitation_ref, invitation_data)
+
+            notification_data = {
+                "receiver_id": uid,
+                "send_at": timestamp,
+                "type": NotificationType.INVITATION.value,
+                "content": f"You have been invited to join the conversation '{conv.get('name')}' by user {requester_uid}.",
+                "read": False,
+                "ref_id": invitation_ref.id,
+                "actor_id": requester_uid
+            }
+            notification_ref = self.conversation_repository._get_db().collection("notifications").document()
+            batch.set(notification_ref, notification_data)
+
             # await self.conversation_repository.upsert_user_conversation_summary(uid, conversation_id, summary)
-            background_tasks.add_task(
-                self.conversation_repository.upsert_user_conversation_summary, 
-                uid, conversation_id, summary
-            )
+            # background_tasks.add_task(
+            #     self.conversation_repository.upsert_user_conversation_summary, 
+            #     uid, conversation_id, summary
+            # )
         
-        return ResponseSchema(data=await self._build_response(updated_conv))
+        await batch.commit()
+        return ResponseSchema(data=await self._build_response(conv))
     
     async def remove_members_from_conversation(self, conversation_id: str, requester_uid: str, target_uids: list[str]) -> ResponseSchema[ConversationResponse]:
         """Xóa nhiều thành viên khỏi một conversation."""
@@ -164,6 +196,23 @@ class ConversationService:
         #for uid in valid_target_uids:
         #    await self.conversation_repository.remove_user_conversation_summary(uid, conversation_id)
         
+        batch = self.conversation_repository._get_db().batch()
+        timestamp = datetime.now(timezone.utc)
+
+        for target_uid in valid_target_uids:
+            notification_data = {
+                "receiver_id": target_uid,
+                "send_at": timestamp,
+                "type": NotificationType.CONVERSATION_MESSAGE.value,
+                "content": f"You have been removed from the conversation '{conv.get('name')}' by user {requester_uid}.",
+                "read": False,
+                "ref_id": conversation_id,
+                "actor_id": requester_uid
+            }
+            notification_ref = self.conversation_repository._get_db().collection("notifications").document()
+            batch.set(notification_ref, notification_data)
+        
+        await batch.commit()
         return ResponseSchema(data=await self._build_response(updated_conv))
     
     async def send_message_to_conversation(self, conversation_id: str, requester_uid: str, message_data: SendMessageRequest, background_tasks: BackgroundTasks) -> ResponseSchema[ConversationResponse]:
