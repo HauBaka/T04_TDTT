@@ -44,6 +44,18 @@ class UserRepository(BaseRepository):
     async def update_user(self, uid: str, update_data: dict) -> None:
         # NOTE: Để service xử lý exceptions
         await self._update(uid, update_data)
+    
+    async def get_travel_preference(self, uid: str) -> dict | None:
+        """TODO: Lấy travel_profile field từ document user."""
+        raise NotImplementedError()
+    
+    async def update_travel_preference(self, uid: str, preference: dict) -> dict:
+        """TODO: Ghi hoặc cập nhật travel_profile cho user."""
+        raise NotImplementedError()
+    
+    async def delete_travel_preference(self, uid: str) -> bool:
+        """TODO: Xóa travel_profile của user."""
+        raise NotImplementedError()
 
     async def delete_user(self, uid: str) -> bool:
         return await self._delete(uid)

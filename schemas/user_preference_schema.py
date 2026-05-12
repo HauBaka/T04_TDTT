@@ -61,8 +61,8 @@ class UserTravelPreferenceRequest(BaseModel):
     notes: str | None = None
 
 
-class UserTravelPreferenceUpsertRequest(UserTravelPreferenceRequest):
-    """Schema đồng bộ cho endpoint upsert preference.
+class UserTravelPreferenceUpdateRequest(UserTravelPreferenceRequest):
+    """Schema đồng bộ cho endpoint update preference.
 
     Tách riêng để API không nhận trực tiếp model lưu trữ.
     """
