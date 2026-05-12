@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from typing import Iterable
 
+import uuid
+from datetime import datetime, timedelta, timezone
 from repositories.behavior_event_repo import behavior_event_repo
 from schemas.user_behavior_schema import UserBehaviorEvent, UserEventType
 
@@ -13,7 +14,7 @@ class BehaviorService:
         """Khởi tạo service với repository implementation."""
         self.repo = behavior_event_repo
         
-    def record_event(
+    async def record_event(
         self,
         user_id: str,
         event_type: UserEventType,
@@ -22,25 +23,43 @@ class BehaviorService:
         metadata: dict[str, str] | None = None,
         source: str | None = None,
     ) -> str:
-        """TODO: Ghi nhận một sự kiện hành vi của người dùng."""
-        raise NotImplementedError()
+        """Ghi nhận một sự kiện hành vi của người dùng."""
+        event_id = uuid.uuid4().hex
+        meta = metadata.copy() if metadata else {}
+        if source:
+            meta["source"] = source
+        event = UserBehaviorEvent(
+            id=event_id,
+            user_id=user_id,
+            event_type=event_type,
+            target_id=target_id,
+            target_name=target_name,
+            metadata=meta
+        )
+        return await self.repo.create_event(event)
 
-    def get_recent_events(
-        self, user_id: str, limit: int = 100, offset: int = 0
-    ) -> Iterable[UserBehaviorEvent]:
-        """TODO: Lấy các events gần đây nhất của user."""
-        raise NotImplementedError()
+    async def get_recent_events(
+        self,
+        user_id: str,
+        limit: int = 100,
+        last_doc=None,
+    ) -> list[UserBehaviorEvent]:
+        """Lấy các events gần đây nhất của user."""
+        return await self.repo.list_events_for_user(user_id, limit=limit, last_doc=last_doc)
 
-    def get_event_count(self, user_id: str) -> int:
-        """TODO: Đếm tổng số events của user."""
-        raise NotImplementedError()
+    async def get_event_count(self, user_id: str) -> int:
+        """Đếm tổng số events của user."""
+        return await self.repo.count_events_for_user(user_id)
 
-    def delete_event(self, event_id: str) -> bool:
-        """TODO: Xóa một event cụ thể (GDPR right to be forgotten)."""
-        raise NotImplementedError()
+    async def delete_event(self, event_id: str) -> bool:
+        """Xóa một event cụ thể (GDPR right to be forgotten)."""
+        deleted_count = await self.repo.delete_events([event_id])
+        return deleted_count > 0
 
-    def purge_old_events(self, days: int = 365) -> int:
-        """TODO: Xóa events cũ hơn N ngày (retention policy)."""
-        raise NotImplementedError()
+    async def purge_old_events(self, days: int = 365) -> int:
+        """Xóa events cũ hơn N ngày (retention policy)."""
+        cutoff_dt = datetime.now(timezone.utc) - timedelta(days=days)
+        cutoff_iso = cutoff_dt.isoformat().replace("+00:00", "Z")
+        return await self.repo.purge_older_than(cutoff_iso)
     
 behavior_service = BehaviorService()
