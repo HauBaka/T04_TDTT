@@ -3,10 +3,18 @@ from schemas.response_schema import ResponseSchema
 from core.dependencies import get_current_user
 from services.trip_service import trip_service
 
-from schemas.trip_schema import TripCreateRequest, TripMemberTracking, TripResponse, TripUpdateRequest, TripAddMembersRequest, TripRemoveMembersRequest
-
+from schemas.trip_schema import (
+    TripUpdateRequest, 
+    TripAddMembersRequest, 
+    TripRemoveMembersRequest,
+    TripMemberResponse, 
+    TripCreateRequest, 
+    TripResponse, 
+)
 
 trip_router = APIRouter()
+
+# --- QUẢN LÝ CHUYẾN ĐI (TRIPS) ---
 
 @trip_router.post("/trips", response_model=ResponseSchema[TripResponse])
 async def create_trip(trip_request: TripCreateRequest, requester=Depends(get_current_user(optional=False))):
@@ -28,6 +36,8 @@ async def delete_trip(trip_id: str, requester=Depends(get_current_user(optional=
     """Xóa một trip."""
     return await trip_service.delete_trip(trip_id, requester.get("uid"))
 
+# --- QUẢN LÝ THÀNH VIÊN (MEMBERS) ---
+
 @trip_router.post("/trips/{trip_id}/members", response_model=ResponseSchema[TripResponse])
 async def add_members_to_trip(trip_id: str, request: TripAddMembersRequest, requester=Depends(get_current_user(optional=False))):
     """Thêm nhiều thành viên vào một trip."""
@@ -38,7 +48,7 @@ async def remove_members_from_trip(trip_id: str, request: TripRemoveMembersReque
     """Xóa nhiều thành viên khỏi một trip."""
     return await trip_service.remove_members_from_trip(trip_id, requester.get("uid"), request.member_uids)
 
-@trip_router.get("/trips/{trip_id}/members", response_model=ResponseSchema[list[TripMemberTracking]])
+@trip_router.get("/trips/{trip_id}/members", response_model=ResponseSchema[list[TripMemberResponse]])
 async def get_trip_members(trip_id: str, requester=Depends(get_current_user(optional=False))):
-    """Lấy thông tin thành viên của một trip."""
+    """Lấy thông tin chi tiết thành viên của một trip."""
     return await trip_service.get_trip_members(trip_id, requester.get("uid"))

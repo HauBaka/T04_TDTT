@@ -30,7 +30,7 @@ import httpx
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Khởi tạo Firebase
-    firebase_manager.initialize() 
+    await firebase_manager.initialize() 
     # Khởi tạo Virtual Review 
     try:
         virtual_review_manager.initialize("mock_data/user_reviews.csv")
@@ -91,7 +91,7 @@ app.include_router(notification_router, tags=["notification"])
 app.include_router(conversation_router, tags=["conversation"])
 app.include_router(trip_router, tags=["trip"])
 app.include_router(view_router, tags=["view"])
-app.include_router(upload_router, tags=["upload"])
+app.include_router(upload_router, tags=["uploads"])
 # Xử lý các lỗi
 @app.exception_handler(AppException) # Xử lý lỗi ứng dụng
 async def app_exception_handler(request: Request, exc: AppException):

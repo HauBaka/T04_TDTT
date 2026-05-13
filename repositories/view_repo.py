@@ -4,12 +4,12 @@ from google.cloud.firestore_v1.base_query import FieldFilter
 
 from repositories.base_repo import BaseRepository
 
-from schemas.view_schema import TopType, ViewTargetType
-from schemas.collection_schema import CollectionPublic, CollectionVisibility
+from schemas.view_schema import TopType, ViewTargetType, ViewLogDocument, ViewStats
+from schemas.collection_schema import CollectionPublicResponse, CollectionVisibility
 from schemas.discover_schema import DiscoverHotel
 
 MODEL_MAP = {
-    ViewTargetType.COLLECTION: CollectionPublic,
+    ViewTargetType.COLLECTION: CollectionPublicResponse,
     ViewTargetType.HOTEL: DiscoverHotel
 }
 
@@ -24,8 +24,7 @@ class ViewRepository(BaseRepository):
         cur_week = iso[1]
 
         doc_id = f"{viewer_id}_{target_type.value}_{target_id}"
-        db = self._db
-        batch = db.batch()
+        batch = self._db.batch()
 
         # Cập nhật log xem của người dùng
         log_ref = self._collection.document(doc_id)
@@ -33,20 +32,24 @@ class ViewRepository(BaseRepository):
 
 
         if not log_doc.exists:
-            batch.set(log_ref, {
-                "viewer_id": viewer_id,
-                "target_id": target_id,
-                "target_type": target_type.value,
-                "last_update": now
-            })
+            log =  ViewLogDocument(
+                viewer_id=viewer_id,
+                target_id=target_id,
+                target_type=target_type,
+                last_update=now
+            )
+            batch.set(log_ref, log.model_dump(mode="python"))
         else:
             log_data = log_doc.to_dict() or {}
-            last_update = log_data.get("last_update")
-            if last_update and now - last_update < timedelta(minutes=30):
+            log = ViewLogDocument.model_validate(log_data)
+            
+            if now - log.last_update < timedelta(minutes=30):
                 return
             
+            log.last_update = now
+
             batch.update(log_ref, {
-                "last_update": now
+                "last_update": log.last_update
             })
         # Xác định collection và document của target
         target_ref = self._db.collection(target_type.value).document(target_id)
@@ -56,32 +59,29 @@ class ViewRepository(BaseRepository):
             return
         
         target_data = target_doc.to_dict() or {}
-        views_data = target_data.get("views", {})
-        
-        old_year = views_data.get("year")
-        old_week = views_data.get("week")
+        views = ViewStats.model_validate(target_data.get("views", {}))
 
-        if old_year == cur_year and old_week == cur_week:
+        update_data = {
+            "views.total_views": firestore.Increment(1),
+            "views.last_update": now
+        }
+
+        if views.year == cur_year and views.week == cur_week:
             # Cùng tuần: Tăng total_views và weekly_views thêm 1
-            batch.update(target_ref, {
-                "views.total_views": firestore.Increment(1),
-                "views.weekly_views": firestore.Increment(1),
-                "views.last_update": now
-            })
+            update_data["views.weekly_views"] = firestore.Increment(1)
         else:
             # Sang tuần mới: Tăng total_views, nhưng reset weekly_views về 1 và cập nhật mốc thời gian
-            batch.update(target_ref, {
-                "views.total_views": firestore.Increment(1),
+            update_data.update({
                 "views.weekly_views": 1,
                 "views.year": cur_year,
-                "views.week": cur_week,
-                "views.last_update": now
+                "views.week": cur_week
             })
 
+        batch.update(target_ref, update_data)
 
         await batch.commit()
 
-    async def get_top_views(self, target_type: ViewTargetType, limit: int = 10, page: int = 1, top_type: TopType = TopType.ALL_TIME) -> list[CollectionPublic | DiscoverHotel]:
+    async def get_top_views(self, target_type: ViewTargetType, limit: int = 10, page: int = 1, top_type: TopType = TopType.ALL_TIME) -> list[CollectionPublicResponse | DiscoverHotel]:
         db = self._db
         
         now = self._current_timestamp

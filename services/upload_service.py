@@ -6,6 +6,7 @@ from externals.r2_client import r2_client
 from core.settings import settings
 from repositories.upload_repo import upload_repo
 from schemas.upload_schema import (
+    UploadCreateRequest,
     UploadPresignRequest,
     UploadPresignResponse,
     UploadConfirmRequest,
@@ -46,17 +47,17 @@ class UploadService:
         now = datetime.now(timezone.utc)
 
         await upload_repo.create_pending(
-            {
-                "user_id": self.user_id,
-                "file_key": file_key,
-                "content_type": request.content_type,
-                "file_size": request.file_size,
-                "category": request.category.value,
-                "status": UploadStatus.PENDING.value,
-                "created_at": now,
-                "expires_at": now + timedelta(minutes=settings.UPLOAD_PENDING_TTL_MINUTES),
-                "public_url": public_url,
-            }
+            UploadCreateRequest(
+                user_id=self.user_id,
+                file_key=file_key,
+                content_type=request.content_type,
+                file_size=request.file_size,
+                category=request.category,
+                status=UploadStatus.PENDING,
+                created_at=now,
+                expires_at=now + timedelta(minutes=settings.UPLOAD_PENDING_TTL_MINUTES),
+                public_url=public_url,
+            )
         )
 
         return UploadPresignResponse(
@@ -71,12 +72,12 @@ class UploadService:
         if not pending:
             raise NotFoundError("Pending upload not found")
 
-        expires_at = pending.get("expires_at")
+        expires_at = pending.expires_at
         if not expires_at:
             raise AppException("Invalid pending upload state", status_code=400)
 
         if isinstance(expires_at, str):
-            expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+            expires_at = datetime.fromisoformat(expires_at)
 
         if expires_at.tzinfo is None:
             expires_at = expires_at.replace(tzinfo=timezone.utc)
@@ -93,14 +94,14 @@ class UploadService:
 
         self._validate_file_size(size_bytes)
 
-        expected_size = pending.get("file_size")
+        expected_size = pending.file_size
         if expected_size is not None and size_bytes != int(expected_size):
             raise ValidationError("Uploaded file size mismatch")
 
         self._validate_mime_type(content_type)
 
         await upload_repo.mark_confirmed(
-            pending["id"],
+            pending.id,
             {
                 "status": UploadStatus.CONFIRMED.value,
                 "confirmed_at": datetime.now(timezone.utc),

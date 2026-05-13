@@ -7,7 +7,7 @@ class FirebaseManager:
     def __init__(self):
         self._db = None
 
-    def initialize(self):
+    async def initialize(self):
         if not firebase_admin._apps:
             firebase_credential_path = settings.FIREBASE_CREDENTIAL.get_secret_value()
             if not os.path.exists(firebase_credential_path):
