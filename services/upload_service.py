@@ -22,11 +22,14 @@ _ALLOWED_EXTENSIONS: Dict[str, str] = {
     "image/gif": ".gif",
 }
 
+
 class UploadService:
     def __init__(self, user_id: str) -> None:
         self.user_id = user_id
 
-    async def create_presigned_upload(self, request: UploadPresignRequest) -> UploadPresignResponse:
+    async def create_presigned_upload(
+        self, request: UploadPresignRequest
+    ) -> UploadPresignResponse:
         self._validate_file_size(request.file_size)
         self._validate_mime_type(request.content_type)
 
@@ -67,7 +70,9 @@ class UploadService:
             expires_at=expires_at.isoformat(),
         )
 
-    async def confirm_upload(self, request: UploadConfirmRequest) -> UploadConfirmResponse:
+    async def confirm_upload(
+        self, request: UploadConfirmRequest
+    ) -> UploadConfirmResponse:
         pending = await upload_repo.get_pending_by_key(self.user_id, request.file_key)
         if not pending:
             raise NotFoundError("Pending upload not found")

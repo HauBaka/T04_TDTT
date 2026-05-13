@@ -22,19 +22,22 @@ class TripStatus(str, Enum):
     ACTIVE = "active"
     ENDED = "ended"
 
+
 class MemberTrackingStatus(str, Enum):
-    ACTIVE = "active"             # Đang di chuyển/online
-    LOST_SIGNAL = "lost_signal"   # Mất tín hiệu (dựa trên updated_at)
-    WRONG_DIRECTION = "wrong_direction" # Đi sai hướng
-    ARRIVED = "arrived"           # Đã đến đích (place_id)
-    LEFT = "left"                 # Đã rời hoạt động
-    NO_SHARE = "no_share"         # Không chia sẻ vị trí
+    ACTIVE = "active"  # Đang di chuyển/online
+    LOST_SIGNAL = "lost_signal"  # Mất tín hiệu (dựa trên updated_at)
+    WRONG_DIRECTION = "wrong_direction"  # Đi sai hướng
+    ARRIVED = "arrived"  # Đã đến đích (place_id)
+    LEFT = "left"  # Đã rời hoạt động
+    NO_SHARE = "no_share"  # Không chia sẻ vị trí
+
 
 class TripMemberTracking(BaseModel):
     """
     Dữ liệu vị trí realtime của từng thành viên.
     Lưu tại: trips/{trip_id}/members/{uid}
     """
+
     model_config = ConfigDict(from_attributes=True)
 
     uid: str
@@ -42,6 +45,7 @@ class TripMemberTracking(BaseModel):
     lng: float | None = None
     updated_at: datetime
     status: MemberTrackingStatus = MemberTrackingStatus.NO_SHARE
+
 
 # --- DOCUMENTS
 class TripMemberDocument(BaseModel):
@@ -54,6 +58,7 @@ class TripMemberDocument(BaseModel):
 
 class TripDocument(BaseModel):
     """trips/{trip_id}"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: str
@@ -70,6 +75,7 @@ class TripDocument(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+
 # --- RESPONSE
 class TripPlaceResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -84,22 +90,26 @@ class TripPlaceResponse(BaseModel):
     # Nhận phòng & Trả phòng
     check_in_time: str | None = None
     check_out_time: str | None = None
-    price: float # json_data -> rate_per_night.extracted_lowest
+    price: float  # json_data -> rate_per_night.extracted_lowest
     deal: str | None = None
-    booking_sources: list[BookingSource] = [] # Danh sách giá ở các trang khác
+    booking_sources: list[BookingSource] = []  # Danh sách giá ở các trang khác
     # ảnh & Tiện ích
-    images: list[HotelImage] = [] 
+    images: list[HotelImage] = []
     amenities: list[str] = []
-        # Reviews gốc
-    raw_rating: float = 0.0 # trung bình từ các user reviews
-    user_reviews: list[UserReview] = [] # Danh sách review gốc (chưa phân tích)
+    # Reviews gốc
+    raw_rating: float = 0.0  # trung bình từ các user reviews
+    user_reviews: list[UserReview] = []  # Danh sách review gốc (chưa phân tích)
 
     # Ai phân tích lại
     ai_sentiment: AISentimentResult | None = None
-    ai_summary: AIReviewSummary | None = None     # Tóm tắt do AI tạo ra, có thể hết hạn và cần được làm mới
+    ai_summary: AIReviewSummary | None = (
+        None  # Tóm tắt do AI tạo ra, có thể hết hạn và cần được làm mới
+    )
 
     # views
     views: ViewResponse = Field(default_factory=ViewResponse)
+
+
 class TripResponse(BaseModel):
     id: str
     owner_uid: str
@@ -115,9 +125,11 @@ class TripResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+
 class TripMemberResponse(UserPreviewResponse):
     tracking: TripMemberTracking | None = None
     joined_at: datetime
+
 
 # --- REQUEST
 class TripCreateRequest(BaseModel):
@@ -125,16 +137,31 @@ class TripCreateRequest(BaseModel):
     place_id: str = Field(..., description="ID địa điểm đích đến")
     start_at: datetime
     end_at: datetime
+
+
 class TripAddMembersRequest(BaseModel):
     """schema dùng cho API thêm thành viên"""
-    member_uids: list[str] = Field(...,min_length=1,description="Danh sách UID thành viên muốn thêm. Không được để rỗng.")
-    
+
+    member_uids: list[str] = Field(
+        ...,
+        min_length=1,
+        description="Danh sách UID thành viên muốn thêm. Không được để rỗng.",
+    )
+
+
 class TripRemoveMembersRequest(BaseModel):
     """Schema dùng cho API xóa thành viên"""
-    member_uids: list[str] = Field(..., min_length=1, description="Danh sách UID thành viên muốn xóa. Không được để rỗng.")
-    
+
+    member_uids: list[str] = Field(
+        ...,
+        min_length=1,
+        description="Danh sách UID thành viên muốn xóa. Không được để rỗng.",
+    )
+
+
 class TripUpdateRequest(BaseModel):
     """Chỉ owner mới được gọi và chỉ khi status là WAITING"""
+
     name: str | None = None
     place_id: str | None = None
     start_at: datetime | None = None

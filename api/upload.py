@@ -12,8 +12,11 @@ from services.upload_service import UploadService
 
 upload_router = APIRouter(prefix="/uploads", tags=["uploads"])
 
+
 @upload_router.post("/presign", response_model=ResponseSchema[UploadPresignResponse])
-async def create_presigned_upload(request: UploadPresignRequest, user=Depends(get_current_user(optional=False))):
+async def create_presigned_upload(
+    request: UploadPresignRequest, user=Depends(get_current_user(optional=False))
+):
     service = UploadService(user_id=user.get("uid"))
     result = await service.create_presigned_upload(request)
 
@@ -25,7 +28,9 @@ async def create_presigned_upload(request: UploadPresignRequest, user=Depends(ge
 
 
 @upload_router.post("/confirm", response_model=ResponseSchema[UploadConfirmResponse])
-async def confirm_upload(request: UploadConfirmRequest, user=Depends(get_current_user(optional=False))):
+async def confirm_upload(
+    request: UploadConfirmRequest, user=Depends(get_current_user(optional=False))
+):
     service = UploadService(user_id=user.get("uid"))
     result = await service.confirm_upload(request)
 

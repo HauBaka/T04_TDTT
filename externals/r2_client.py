@@ -18,7 +18,9 @@ class R2Client:
             config=Config(signature_version="s3v4"),
         )
 
-    async def generate_presigned_put_url(self, key: str, content_type: str, expires_in: int) -> str:
+    async def generate_presigned_put_url(
+        self, key: str, content_type: str, expires_in: int
+    ) -> str:
         def _sign() -> str:
             return self._client.generate_presigned_url(
                 ClientMethod="put_object",

@@ -17,7 +17,9 @@ class UploadRepository(BaseRepository):
         await doc_ref.set(data.model_dump(mode="python", exclude_none=False))
         return doc_ref.id
 
-    async def get_pending_by_key(self, user_id: str, file_key: str) -> Optional[UploadDocument]:
+    async def get_pending_by_key(
+        self, user_id: str, file_key: str
+    ) -> Optional[UploadDocument]:
         query = (
             self._collection.where(filter=FieldFilter("user_id", "==", user_id))
             .where(filter=FieldFilter("file_key", "==", file_key))
@@ -36,5 +38,6 @@ class UploadRepository(BaseRepository):
 
     async def mark_confirmed(self, doc_id: str, update_data: dict) -> None:
         await self._collection.document(doc_id).update(update_data)
+
 
 upload_repo = UploadRepository()

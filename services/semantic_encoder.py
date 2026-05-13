@@ -55,7 +55,9 @@ class SemanticTextEncoder:
             try:
                 # Encode only uncached texts to reduce compute cost.
                 encoded = self._encode_batch(missing_texts)
-                for position, text, vector in zip(missing_positions, missing_texts, encoded):
+                for position, text, vector in zip(
+                    missing_positions, missing_texts, encoded
+                ):
                     embedding = tuple(float(value) for value in vector)
                     ordered_results[position] = embedding
                     self._embedding_cache[text] = embedding
@@ -110,18 +112,24 @@ class SemanticTextEncoder:
         with torch.no_grad():
             outputs = self._model(**inputs)
             # Mean pooling over valid tokens, then L2 normalize for cosine use.
-            embeddings = self._mean_pool(outputs.last_hidden_state, inputs["attention_mask"])
+            embeddings = self._mean_pool(
+                outputs.last_hidden_state, inputs["attention_mask"]
+            )
             embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
 
         return [embedding.cpu() for embedding in embeddings]
 
-    def _mean_pool(self, token_embeddings: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
+    def _mean_pool(
+        self, token_embeddings: torch.Tensor, attention_mask: torch.Tensor
+    ) -> torch.Tensor:
         mask = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
         summed = torch.sum(token_embeddings * mask, dim=1)
         counts = torch.clamp(mask.sum(dim=1), min=1e-9)
         return summed / counts
 
-    def _cosine_similarity(self, left: tuple[float, ...], right: tuple[float, ...]) -> float:
+    def _cosine_similarity(
+        self, left: tuple[float, ...], right: tuple[float, ...]
+    ) -> float:
         dot = sum(a * b for a, b in zip(left, right))
         return max(-1.0, min(1.0, dot))
 

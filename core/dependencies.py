@@ -22,10 +22,12 @@ def get_current_user(optional: bool = False):
         try:
             return auth.verify_id_token(token)
 
-        except (InvalidIdTokenError,
-                ExpiredIdTokenError,
-                RevokedIdTokenError,
-                CertificateFetchError):
+        except (
+            InvalidIdTokenError,
+            ExpiredIdTokenError,
+            RevokedIdTokenError,
+            CertificateFetchError,
+        ):
             if optional:
                 return None
             raise UnauthorizedError("Invalid or expired token")

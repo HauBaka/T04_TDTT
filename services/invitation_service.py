@@ -15,7 +15,9 @@ class InvitationService:
     def __init__(self):
         self.invitation_repo = invitation_repo
 
-    async def create_invitation(self, sender_uid: str, invitation_request: InvitationCreateRequest) -> ResponseSchema[InvitationResponse]:
+    async def create_invitation(
+        self, sender_uid: str, invitation_request: InvitationCreateRequest
+    ) -> ResponseSchema[InvitationResponse]:
         """Tạo một lời mời mới."""
         return ResponseSchema[InvitationResponse](
             status_code=201,
@@ -28,11 +30,13 @@ class InvitationService:
                 ref_id=invitation_request.ref_id,
                 status=InvitationStatus.PENDING,
                 created_at=invitation_request.expired_at,
-                expired_at=invitation_request.expired_at
-            )
+                expired_at=invitation_request.expired_at,
+            ),
         )
 
-    async def get_invitation(self, invitation_id: str, requester_uid: str) -> ResponseSchema[InvitationResponse]:
+    async def get_invitation(
+        self, invitation_id: str, requester_uid: str
+    ) -> ResponseSchema[InvitationResponse]:
         """Lấy thông tin của một lời mời cụ thể."""
         return ResponseSchema[InvitationResponse](
             status_code=200,
@@ -45,11 +49,16 @@ class InvitationService:
                 ref_id="ref_id",
                 status=InvitationStatus.PENDING,
                 created_at=datetime.now(),
-                expired_at=datetime.now()
-            )
+                expired_at=datetime.now(),
+            ),
         )
 
-    async def update_invitation(self, invitation_id: str, requester_uid: str, invitation_update: InvitationUpdateRequest) -> ResponseSchema[InvitationResponse]:
+    async def update_invitation(
+        self,
+        invitation_id: str,
+        requester_uid: str,
+        invitation_update: InvitationUpdateRequest,
+    ) -> ResponseSchema[InvitationResponse]:
         """Cập nhật trạng thái của một lời mời cụ thể."""
         return ResponseSchema[InvitationResponse](
             status_code=200,
@@ -62,11 +71,13 @@ class InvitationService:
                 ref_id="ref_id",
                 status=invitation_update.status,
                 created_at=datetime.now(),
-                expired_at=datetime.now()
-        ))
-    
+                expired_at=datetime.now(),
+            ),
+        )
+
     async def delete_invitation(self, invitation_id: str, requester_uid: str) -> bool:
         """Xóa một lời mời cụ thể."""
         return True
-    
+
+
 invitation_service = InvitationService()

@@ -28,11 +28,10 @@ class PhoBERTClient:
             raise RuntimeError(f"Failed to load PhoBERT model: {str(exc)}")
 
     def __call__(self, texts):
-        #self._ensure_loaded()
+        # self._ensure_loaded()
         if self._pipeline is None:
             raise RuntimeError("PhoBERT is not available")
         return self._pipeline(texts)
 
 
 PhoBERT = PhoBERTClient()
-

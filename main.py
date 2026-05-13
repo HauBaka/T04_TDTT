@@ -33,8 +33,8 @@ from mock_data.virtual_review import virtual_review_manager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Khởi tạo Firebase
-    await firebase_manager.initialize() 
-    # Khởi tạo Virtual Review 
+    await firebase_manager.initialize()
+    # Khởi tạo Virtual Review
     try:
         virtual_review_manager.initialize("mock_data/user_reviews.csv")
     except FileNotFoundError as e:
@@ -51,6 +51,7 @@ async def lifespan(app: FastAPI):
     if http_client._http_client:
         await http_client._http_client.aclose()
 
+
 app = FastAPI(lifespan=lifespan)
 app.state.limiter = limiter
 app.add_middleware(
@@ -62,6 +63,8 @@ app.add_middleware(
 )
 app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(AutoRateLimitMiddleware)
+
+
 # Middleware để log thông tin request và response
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
@@ -83,6 +86,8 @@ async def log_requests(request: Request, call_next):
         )
 
     return response
+
+
 # Đăng ký router
 app.include_router(health_router, tags=["health"])
 app.include_router(discover_router, tags=["discover"])
@@ -95,19 +100,19 @@ app.include_router(conversation_router, tags=["conversation"])
 app.include_router(trip_router, tags=["trip"])
 app.include_router(view_router, tags=["view"])
 app.include_router(upload_router, tags=["uploads"])
+
+
 # Xử lý các lỗi
-@app.exception_handler(AppException) # Xử lý lỗi ứng dụng
+@app.exception_handler(AppException)  # Xử lý lỗi ứng dụng
 async def app_exception_handler(request: Request, exc: AppException):
     logger.error(f"AppException: {exc.message}")
     return JSONResponse(
         status_code=exc.status_code,
-        content={
-            "status_code": exc.status_code,
-            "message": exc.message,
-            "data": None
-        }
+        content={"status_code": exc.status_code, "message": exc.message, "data": None},
     )
-@app.exception_handler(Exception) # Xử lý lỗi không mong muốn
+
+
+@app.exception_handler(Exception)  # Xử lý lỗi không mong muốn
 async def general_exception_handler(request: Request, exc: Exception):
     logger.error(f"Unhandled Exception: {str(exc)}")
     return JSONResponse(
@@ -115,26 +120,32 @@ async def general_exception_handler(request: Request, exc: Exception):
         content={
             "status_code": 500,
             "message": "An unexpected error occurred.",
-            "data": None
-        }
+            "data": None,
+        },
     )
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     clean_errors = []
     for error in exc.errors():
-        clean_errors.append({
-            "field": " -> ".join([str(x) for x in error.get("loc", [])]),
-            "message": error.get("msg")
-        })
+        clean_errors.append(
+            {
+                "field": " -> ".join([str(x) for x in error.get("loc", [])]),
+                "message": error.get("msg"),
+            }
+        )
 
     return JSONResponse(
         status_code=422,
         content={
             "status_code": 422,
             "message": "Validation Error",
-            "errors": clean_errors
-        }
+            "errors": clean_errors,
+        },
     )
+
+
 # default route
 @app.get("/", status_code=200)
 async def root():

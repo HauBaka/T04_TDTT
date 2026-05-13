@@ -11,6 +11,7 @@ class NotificationType(str, Enum):
     CONVERSATION_MESSAGE = "conversation message"
     TRIP_UPDATE = "trip update"
 
+
 class NotificationResponse(BaseModel):
     id: str
     send_at: datetime
@@ -19,6 +20,7 @@ class NotificationResponse(BaseModel):
     read: bool = False
     ref_id: str
     actor_id: str
+
 
 class UpdateNotificationRequest(BaseModel):
     read: bool

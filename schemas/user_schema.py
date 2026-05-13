@@ -8,6 +8,7 @@ from schemas.user_preference_schema import ScoringWeights, UserTravelPreference
 
 class UserDocument(BaseModel):
     """users/{uid}"""
+
     model_config = ConfigDict(from_attributes=True)
 
     # Thông tin định danh
@@ -38,12 +39,15 @@ class UserDocument(BaseModel):
     travel_profile: UserTravelPreference | None = None
     scoring_weights: ScoringWeights | None = None
 
+
 class SavedCollectionDocument(BaseModel):
     """Thông tin về collection đã được user lưu.
-        users/{uid}/saved_collections/{collection_id}
+    users/{uid}/saved_collections/{collection_id}
     """
+
     collection_id: str
     saved_at: datetime
+
 
 class UserCreateRequest(BaseModel):
     uid: str
@@ -73,8 +77,9 @@ class UserPublicResponse(BaseModel):
     display_name: str
     avatar_url: str | None = None
     bio: str | None = Field(None, max_length=500)
-    
+
     last_login: datetime | None = None
+
 
 class UserPrivateResponse(UserPublicResponse):
     email: str | None = None
@@ -87,14 +92,15 @@ class UserPrivateResponse(UserPublicResponse):
     last_updated: datetime | None = None
     last_login: datetime | None = None
 
-    current_trip: str | None = None 
+    current_trip: str | None = None
 
     travel_profile: UserTravelPreference | None = None
     scoring_weights: ScoringWeights | None = None
 
+
 class UserUpdateRequest(BaseModel):
     username: str | None = Field(None, min_length=3, max_length=16)
-    email: str | None = Field(None, pattern=r'^[\w\.-]+@[\w\.-]+\.\w+$')
+    email: str | None = Field(None, pattern=r"^[\w\.-]+@[\w\.-]+\.\w+$")
 
     display_name: str | None = Field(None, min_length=3, max_length=32)
     avatar_url: str | None = None
@@ -102,26 +108,34 @@ class UserUpdateRequest(BaseModel):
 
     phone_number: str | None = Field(None, max_length=10)
 
+
 class UserCollectionsResponse(BaseModel):
     liked: list[CollectionPublicResponse] = Field(default_factory=list)
     owned: list[CollectionPublicResponse] = Field(default_factory=list)
     collaborated: list[CollectionPublicResponse] = Field(default_factory=list)
 
+
 class UserSavedCollectionDocument(BaseModel):
     """users/{uid}/saved_collections/{collection_id}"""
+
     collection_id: str
     saved_at: datetime
 
+
 class UserContributingCollectionDocument(BaseModel):
     """users/{uid}/contributing_collections/{collection_id}"""
+
     collection_id: str
     contributed_count: int = 0
     joined_at: datetime
 
+
 class UserOwnedCollectionDocument(BaseModel):
     """users/{uid}/owned_collections/{collection_id}"""
+
     collection_id: str
     created_at: datetime
+
 
 class UserSaveCollectionRequest(BaseModel):
     collection_id: str

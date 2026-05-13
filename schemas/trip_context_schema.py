@@ -15,6 +15,7 @@ class TravelStyle(str, Enum):
     LUXURY = "sang_trong"
     BUDGET = "tiet_kiem"
 
+
 # Schema lưu trữ các tiêu chí tìm kiếm chuyến đi của người dùng
 class TripSearchCriteria(BaseModel):
     budget_min: int | None = None

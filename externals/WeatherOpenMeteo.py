@@ -26,8 +26,9 @@ WMO_WEATHER_CODES = {
     82: "Mưa rào xối xả",
     95: "Mưa dông, có sấm sét",
     96: "Mưa dông kèm mưa đá nhẹ",
-    99: "Mưa dông kèm mưa đá to"
+    99: "Mưa dông kèm mưa đá to",
 }
+
 
 class WeatherOpenMeteo:
     def __init__(self):
@@ -38,7 +39,9 @@ class WeatherOpenMeteo:
         """Hàm phụ trợ dịch mã WMO"""
         return WMO_WEATHER_CODES.get(code, "Thời tiết không xác định")
 
-    async def search(self, lat: float, lng: float, start_date: str, end_date: str) -> list[WeatherInfo]:
+    async def search(
+        self, lat: float, lng: float, start_date: str, end_date: str
+    ) -> list[WeatherInfo]:
         """Gọi API Open-Meteo lấy dữ liệu thô và ép kiểu sang Schema"""
         params: dict[str, str | int | float | bool | None] = {
             "latitude": lat,
@@ -46,7 +49,7 @@ class WeatherOpenMeteo:
             "daily": "weather_code,temperature_2m_max,precipitation_probability_max",
             "timezone": "Asia/Ho_Chi_Minh",
             "start_date": start_date,
-            "end_date": end_date
+            "end_date": end_date,
         }
 
         async with httpx.AsyncClient() as client:
@@ -64,12 +67,13 @@ class WeatherOpenMeteo:
                         WeatherInfo(
                             condition=self._get_condition_text(data["weather_code"][i]),
                             temp_c=float(data["temperature_2m_max"][i]),
-                            rain_chance=int(data["precipitation_probability_max"][i])
+                            rain_chance=int(data["precipitation_probability_max"][i]),
                         )
                     )
                 return weather_list
             except Exception as e:
                 logger.error(f"Lỗi gọi API Open-Meteo: {str(e)}")
                 return []
+
 
 weather_open_meteo = WeatherOpenMeteo()

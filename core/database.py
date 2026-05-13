@@ -18,7 +18,7 @@ class FirebaseManager:
 
             cred = credentials.Certificate(firebase_credential_path)
             firebase_admin.initialize_app(cred)
-            
+
         self._db = firestore_async.client()
 
     def get_db(self):
@@ -34,6 +34,7 @@ class FirebaseManager:
             return "connected"
         except Exception as e:
             return f"error: {str(e)}"
+
 
 firebase_manager = FirebaseManager()
 get_db = firebase_manager.get_db

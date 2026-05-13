@@ -15,7 +15,7 @@ RATE_LIMITS = {
     "chat": "20/minute",
     "search": "60/minute",
     "upload": "5/minute",
-    "default": "100/minute"
+    "default": "100/minute",
 }
 
 ROUTE_GROUPS = {
@@ -23,11 +23,12 @@ ROUTE_GROUPS = {
     "chat": ["/conversation", "/chat"],
     "search": ["/discover", "/search"],
     "upload": ["/upload"],
-    "default": ["/"]
+    "default": ["/"],
 }
 
+
 def uid_then_ip_key(request: Request) -> str:
-    """ Ưu tiên dùng user ID nếu có, nếu không có thì dùng IP để giới hạn tốc độ."""
+    """Ưu tiên dùng user ID nếu có, nếu không có thì dùng IP để giới hạn tốc độ."""
     user = getattr(request.state, "user", None)
 
     if user:
@@ -66,6 +67,7 @@ def get_limited_handler(limit: str):
     _LIMIT_HANDLER_CACHE[limit] = wrapped
     return wrapped
 
+
 class AutoRateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         limit = match_limit(request.url.path, request.method)
@@ -84,9 +86,10 @@ class AutoRateLimitMiddleware(BaseHTTPMiddleware):
 
         except RateLimitExceeded:
             return JSONResponse(
-            status_code=429,
-            content={
-                "status_code": 429,
-                "message": "Rate limit exceeded",
-                "data": None
-            })
+                status_code=429,
+                content={
+                    "status_code": 429,
+                    "message": "Rate limit exceeded",
+                    "data": None,
+                },
+            )
