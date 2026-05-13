@@ -15,7 +15,8 @@ class BehaviorEventRepo(BaseRepository):
     """Interface tối thiểu cho persistence layer của behavior events."""
     def __init__(self):
         super().__init__("user_behavior_events")
-         
+    def _get_db(self):
+        return self._db
     async def create_event(self, event: UserBehaviorEvent) -> str:
         """Lưu một event vào Firestore, trả về document ID."""
         event_data = event.model_dump(exclude={"id"})
