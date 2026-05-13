@@ -1,3 +1,4 @@
+from google.cloud import firestore
 import asyncio
 from repositories.base_repo import BaseRepository
 from google.cloud.firestore_v1.base_query import FieldFilter
@@ -46,16 +47,23 @@ class UserRepository(BaseRepository):
         await self._update(uid, update_data)
     
     async def get_travel_preference(self, uid: str) -> dict | None:
-        """TODO: Lấy travel_profile field từ document user."""
-        raise NotImplementedError()
+        """Lấy travel_profile field từ document user."""
+        user_dict = await self._get_by_id(uid)
+        if not user_dict:
+            return None
+        return user_dict.get("travel_profile")
     
     async def update_travel_preference(self, uid: str, preference: dict) -> dict:
-        """TODO: Ghi hoặc cập nhật travel_profile cho user."""
-        raise NotImplementedError()
+        """Ghi hoặc cập nhật travel_profile cho user."""
+        await self._update(uid, {"travel_profile": preference})
+        return preference
     
     async def delete_travel_preference(self, uid: str) -> bool:
-        """TODO: Xóa travel_profile của user."""
-        raise NotImplementedError()
+        """Xóa travel_profile của user."""
+        # Nên xóa field luôn hay để None đây sếp :<
+        # await self._update(uid, {"travel_profile": firestore.DELETE_FIELD})
+        await self._update(uid, {"travel_profile": None})
+        return True
 
     async def delete_user(self, uid: str) -> bool:
         return await self._delete(uid)
