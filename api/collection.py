@@ -1,21 +1,22 @@
 from fastapi import APIRouter, Depends
+
+from core.dependencies import get_current_user
 from schemas.collection_schema import (
-    AddMultipleContributorsRequest, 
-    AddMultiplePlacesRequest, 
-    AddMultipleTagsRequest,  
-    CollectionUpdateRequest, 
-    RemoveMultipleContributorsRequest, 
-    RemoveMultiplePlacesRequest, 
-    RemoveMultipleTagsRequest,
-    CollectionCreateRequest, 
-    CollectionContributorResponse, 
-    CollectionPlaceResponse, 
-    CollectionResponse, 
+    AddMultipleContributorsRequest,
+    AddMultiplePlacesRequest,
+    AddMultipleTagsRequest,
+    CollectionContributorResponse,
+    CollectionCreateRequest,
+    CollectionPlaceResponse,
+    CollectionResponse,
     CollectionSaverResponse,
+    CollectionUpdateRequest,
+    RemoveMultipleContributorsRequest,
+    RemoveMultiplePlacesRequest,
+    RemoveMultipleTagsRequest,
 )
 from schemas.response_schema import ResponseSchema
 from services.collection_service import collection_service
-from core.dependencies import get_current_user
 
 collection_router = APIRouter()
 

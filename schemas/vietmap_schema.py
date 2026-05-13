@@ -1,5 +1,7 @@
-from pydantic import BaseModel 
+from pydantic import BaseModel
+
 from schemas.discover_schema import GPSCoordinates
+
 
 class VietMapAutocompleteRequest(BaseModel):
     text: str

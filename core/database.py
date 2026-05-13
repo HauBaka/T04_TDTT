@@ -1,7 +1,10 @@
+import os
+
 import firebase_admin
 from firebase_admin import credentials, firestore_async
+
 from core.settings import settings
-import os
+
 
 class FirebaseManager:
     def __init__(self):

@@ -1,10 +1,20 @@
 import asyncio
+
+from google.cloud import firestore
 from loguru import logger
 from pydantic import ValidationError as PydanticValidationError
-from google.cloud import firestore
+
 from core.exceptions import ValidationError
 from repositories.base_repo import BaseRepository
-from schemas.trip_schema import TripCreateRequest, TripDocument, TripMemberDocument, TripStatus, TripUpdateRequest
+from schemas.trip_schema import (
+    TripCreateRequest,
+    TripDocument,
+    TripMemberDocument,
+    TripStatus,
+    TripUpdateRequest,
+)
+
+
 class TripRepository(BaseRepository):
     def __init__(self):
         super().__init__("trips")

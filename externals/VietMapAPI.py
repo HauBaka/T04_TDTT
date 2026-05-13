@@ -1,10 +1,16 @@
+import httpx
+import pygeohash as pgh
 from loguru import logger
 
 from core.settings import settings
-import httpx
 from schemas.discover_schema import GPSCoordinates
-from schemas.vietmap_schema import AutoCompleteResult, VietMapAutocompleteResponse, VietMapPlaceDetailResponse, VietMapPlaceResult
-import pygeohash as pgh
+from schemas.vietmap_schema import (
+    AutoCompleteResult,
+    VietMapAutocompleteResponse,
+    VietMapPlaceDetailResponse,
+    VietMapPlaceResult,
+)
+
 
 class VietMapAPI:
     def __init__(self):

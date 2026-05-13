@@ -1,5 +1,6 @@
-from schemas.response_schema import ResponseSchema
 from typing import Generic, TypeVar
+
+from schemas.response_schema import ResponseSchema
 
 T = TypeVar('T')
 

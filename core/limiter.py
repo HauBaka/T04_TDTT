@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-from typing import Callable, Optional, Dict
 import inspect
-
-from starlette.requests import Request
-from starlette.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
+from typing import Callable, Dict, Optional
 
 from slowapi import Limiter
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-
+from slowapi.util import get_remote_address
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 RATE_LIMITS = {
     "auth": "5/minute",

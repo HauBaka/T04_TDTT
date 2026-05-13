@@ -1,5 +1,7 @@
-from pydantic import BaseModel, ConfigDict, Field
 from datetime import datetime
+
+from pydantic import BaseModel, ConfigDict, Field
+
 from schemas.collection_schema import CollectionPublicResponse
 from schemas.user_preference_schema import ScoringWeights, UserTravelPreference
 

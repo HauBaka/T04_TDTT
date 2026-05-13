@@ -1,8 +1,10 @@
 import logging
-from schemas.discover_schema import DiscoverHotel, GPSCoordinates, WeatherInfo
-from externals.WeatherOpenMeteo import weather_open_meteo
 from datetime import datetime, timedelta
+
+from externals.WeatherOpenMeteo import weather_open_meteo
+from schemas.discover_schema import DiscoverHotel, GPSCoordinates, WeatherInfo
 from services.hotel_ranking_service import hotel_ranking_service
+
 logger = logging.getLogger(__name__)
 
 class WeatherService:

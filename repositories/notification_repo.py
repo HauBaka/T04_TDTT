@@ -1,5 +1,6 @@
 from repositories.base_repo import BaseRepository
 
+
 class NotificationRepository(BaseRepository):
     def __init__(self):
         super().__init__("notifications")

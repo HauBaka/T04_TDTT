@@ -1,9 +1,19 @@
-from pydantic import BaseModel, ConfigDict, Field
 from datetime import datetime
 from enum import Enum
-from schemas.discover_schema import AIReviewSummary, AISentimentResult, BookingSource, GPSCoordinates, HotelImage, UserReview
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from schemas.discover_schema import (
+    AIReviewSummary,
+    AISentimentResult,
+    BookingSource,
+    GPSCoordinates,
+    HotelImage,
+    UserReview,
+)
 from schemas.response_schema import UserPreviewResponse
 from schemas.view_schema import ViewResponse
+
 
 # --- DATATYPES
 class ModifyAction(str, Enum):

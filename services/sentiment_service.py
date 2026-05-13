@@ -1,10 +1,15 @@
+import asyncio
+import logging
+import re
 from datetime import datetime, timedelta, timezone
 
 from externals.PhoBERT import PhoBERT
-import re
-import logging
-import asyncio
-from schemas.discover_schema import AISentimentResult, AnalyzedReview, DiscoverHotel, UserReview
+from schemas.discover_schema import (
+    AISentimentResult,
+    AnalyzedReview,
+    DiscoverHotel,
+    UserReview,
+)
 
 logger = logging.getLogger(__name__)
 REAL_RATING_CACHE_EXPIRATION_DAYS=7

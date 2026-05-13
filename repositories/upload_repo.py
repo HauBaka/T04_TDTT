@@ -7,6 +7,7 @@ from core.exceptions import ValidationError
 from repositories.base_repo import BaseRepository
 from schemas.upload_schema import UploadCreateRequest, UploadDocument, UploadStatus
 
+
 class UploadRepository(BaseRepository):
     def __init__(self):
         super().__init__(collection_name="uploads")

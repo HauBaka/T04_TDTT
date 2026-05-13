@@ -1,16 +1,16 @@
 from fastapi import APIRouter, Depends
-from schemas.response_schema import ResponseSchema
-from core.dependencies import get_current_user
-from services.trip_service import trip_service
 
+from core.dependencies import get_current_user
+from schemas.response_schema import ResponseSchema
 from schemas.trip_schema import (
-    TripUpdateRequest, 
-    TripAddMembersRequest, 
+    TripAddMembersRequest,
+    TripCreateRequest,
+    TripMemberResponse,
     TripRemoveMembersRequest,
-    TripMemberResponse, 
-    TripCreateRequest, 
-    TripResponse, 
+    TripResponse,
+    TripUpdateRequest,
 )
+from services.trip_service import trip_service
 
 trip_router = APIRouter()
 

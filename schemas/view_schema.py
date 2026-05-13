@@ -4,6 +4,7 @@ from enum import Enum
 
 from pydantic import BaseModel, ConfigDict
 
+
 class ViewTargetType(str, Enum):
     HOTEL = "hotels"
     COLLECTION = "collections"

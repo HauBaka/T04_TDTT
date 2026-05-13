@@ -1,9 +1,14 @@
 from __future__ import annotations
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+
 from datetime import datetime, timezone
 from typing import Annotated, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
 from schemas.trip_context_schema import TravelStyle, TripSearchCriteria
 from schemas.view_schema import ViewResponse
+
+
 # ==============================
 # CÁC CLASS REQUEST & VALIDATION
 # ==============================

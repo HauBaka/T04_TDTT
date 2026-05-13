@@ -1,8 +1,10 @@
-from core.exceptions import *
-from externals.SerpAPI import serp_api
-from externals.Gemini import gemini_client
-from core.database import firebase_manager
 import time
+
+from core.database import firebase_manager
+from core.exceptions import *
+from externals.Gemini import gemini_client
+from externals.SerpAPI import serp_api
+
 
 class HealthService:
     def __init__(self):

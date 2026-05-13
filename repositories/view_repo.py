@@ -1,12 +1,12 @@
 from datetime import timedelta
+
 from google.cloud import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 
 from repositories.base_repo import BaseRepository
-
-from schemas.view_schema import TopType, ViewTargetType, ViewLogDocument, ViewStats
 from schemas.collection_schema import CollectionPublicResponse, CollectionVisibility
 from schemas.discover_schema import DiscoverHotel
+from schemas.view_schema import TopType, ViewLogDocument, ViewStats, ViewTargetType
 
 MODEL_MAP = {
     ViewTargetType.COLLECTION: CollectionPublicResponse,

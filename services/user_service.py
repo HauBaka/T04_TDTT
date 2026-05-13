@@ -1,16 +1,31 @@
 import asyncio
 
-from core.exceptions import BadRequestError, ConflictError, NotFoundError, ValidationError
-from repositories.conversation_repo import conversation_repo
-from repositories.user_repo import user_repo
-from repositories.collection_repo import collection_repo
-from schemas.conversation_schema import ConversationResponse
-from schemas.user_schema import UserPublicResponse, UserPrivateResponse, UserSaveCollectionRequest, UserUpdateRequest
-from schemas.collection_schema import CollectionPrivateResponse, CollectionPublicResponse
-from schemas.view_schema import ViewResponse
-from schemas.response_schema import ResponseSchema
 from loguru import logger
 from pydantic import ValidationError as PydanticValidationError
+
+from core.exceptions import (
+    BadRequestError,
+    ConflictError,
+    NotFoundError,
+    ValidationError,
+)
+from repositories.collection_repo import collection_repo
+from repositories.conversation_repo import conversation_repo
+from repositories.user_repo import user_repo
+from schemas.collection_schema import (
+    CollectionPrivateResponse,
+    CollectionPublicResponse,
+)
+from schemas.conversation_schema import ConversationResponse
+from schemas.response_schema import ResponseSchema
+from schemas.user_schema import (
+    UserPrivateResponse,
+    UserPublicResponse,
+    UserSaveCollectionRequest,
+    UserUpdateRequest,
+)
+from schemas.view_schema import ViewResponse
+
 ALLOWED_UPDATE_FIELDS = {"display_name", "username", "email", "phone_number", "bio", "avatar_url"}
 
 class UserService:
@@ -25,7 +40,7 @@ class UserService:
         
         except PydanticValidationError as e:
             logger.error(f"Error validating user data for uid {requester_uid}: {e}")
-            raise ValidationError(f"Failed to validate user data!")
+            raise ValidationError("Failed to validate user data!")
         
     async def get_profile(self, requester_uid: str | None, target_username: str) -> ResponseSchema[UserPublicResponse | UserPrivateResponse]:
         target_user = await self.user_repo.get_user_by_username(target_username)

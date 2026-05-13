@@ -1,13 +1,15 @@
+import uuid
+from datetime import datetime, timezone
+
+from core.exceptions import InternalServerError, NotFoundError
+from repositories.collection_repo import collection_repo
 from repositories.user_repo import user_repo
 from schemas.auth_schema import AuthResponse
-from schemas.response_schema import ResponseSchema
-from core.exceptions import InternalServerError, NotFoundError
-from datetime import datetime, timezone
-import uuid
-from repositories.collection_repo import collection_repo
 from schemas.collection_schema import CollectionCreateRequest, CollectionVisibility
-from services.conversation_service import conversation_service
+from schemas.response_schema import ResponseSchema
 from schemas.user_schema import UserCreateRequest
+from services.conversation_service import conversation_service
+
 
 class AuthenticationService:
     def __init__(self, uid: str, email: str) -> None:

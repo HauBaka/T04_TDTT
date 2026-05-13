@@ -1,11 +1,20 @@
 import asyncio
-from core.exceptions import BadRequestError, DatabaseError, NotFoundError, ValidationError
-from repositories.base_repo import BaseRepository
+
+from google.cloud import firestore as fs
 from google.cloud.firestore_v1.base_query import FieldFilter
-from schemas.user_schema import SavedCollectionDocument, UserCreateRequest, UserDocument
 from loguru import logger
 from pydantic import ValidationError as PydanticValidationError
-from google.cloud import firestore as fs
+
+from core.exceptions import (
+    BadRequestError,
+    DatabaseError,
+    NotFoundError,
+    ValidationError,
+)
+from repositories.base_repo import BaseRepository
+from schemas.user_schema import SavedCollectionDocument, UserCreateRequest, UserDocument
+
+
 class UserRepository(BaseRepository):
     def __init__(self):
         super().__init__("users")

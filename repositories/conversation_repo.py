@@ -1,14 +1,25 @@
 from typing import Optional
 
-from core.exceptions import NotFoundError, ValidationError
-from repositories.user_repo import user_repo
-from repositories.base_repo import BaseRepository
 from google.cloud import firestore
-
-from schemas.conversation_schema import ConversationCreateRequest, ConversationDocument, ConversationMemberDocument, ConversationMemberResponse, ConversationMessageDocument, ConversationRole, ConversationUpdateRequest, SendMessageRequest, UserConversationSummaryUpdate
-
-from pydantic import ValidationError as PydanticValidationError
 from loguru import logger
+from pydantic import ValidationError as PydanticValidationError
+
+from core.exceptions import NotFoundError, ValidationError
+from repositories.base_repo import BaseRepository
+from repositories.user_repo import user_repo
+from schemas.conversation_schema import (
+    ConversationCreateRequest,
+    ConversationDocument,
+    ConversationMemberDocument,
+    ConversationMemberResponse,
+    ConversationMessageDocument,
+    ConversationRole,
+    ConversationUpdateRequest,
+    SendMessageRequest,
+    UserConversationSummaryUpdate,
+)
+
+
 class ConversationRepository(BaseRepository):
     def __init__(self):
         super().__init__("conversations")

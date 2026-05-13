@@ -1,5 +1,7 @@
-import httpx
 import logging
+
+import httpx
+
 from schemas.discover_schema import WeatherInfo
 
 logger = logging.getLogger(__name__)

@@ -1,6 +1,11 @@
 from fastapi import APIRouter, HTTPException
+
 from core.exceptions import AppException
-from schemas.discover_schema import AddressSuggestionRequest, AddressSuggestionResponse, DiscoverRequest
+from schemas.discover_schema import (
+    AddressSuggestionRequest,
+    AddressSuggestionResponse,
+    DiscoverRequest,
+)
 from schemas.response_schema import ResponseSchema
 from services.discover_service import DiscoverService
 

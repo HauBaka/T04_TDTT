@@ -1,5 +1,5 @@
-from fastapi import APIRouter, BackgroundTasks, Request
-from fastapi import Depends
+from fastapi import APIRouter, BackgroundTasks, Depends, Request
+
 from core.dependencies import get_current_user
 from schemas.response_schema import ResponseSchema
 from schemas.view_schema import AddViewRequest, TopViewRequest

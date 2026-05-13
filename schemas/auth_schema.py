@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 
+
 class AuthResponse(BaseModel):
     uid: str
     username: str

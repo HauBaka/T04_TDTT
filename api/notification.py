@@ -1,9 +1,10 @@
 
 from fastapi import APIRouter, Depends
-from schemas.response_schema import ResponseSchema
+
 from core.dependencies import get_current_user
-from services.notification_service import notification_service
 from schemas.notification_schema import NotificationResponse, UpdateNotificationRequest
+from schemas.response_schema import ResponseSchema
+from services.notification_service import notification_service
 
 notification_router = APIRouter()
 

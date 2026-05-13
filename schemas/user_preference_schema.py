@@ -5,6 +5,7 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
+
 # Mức độ chịu đựng thời tiết xấu của người dùng
 class WeatherTolerance(str, Enum):
     LOW = "thap"

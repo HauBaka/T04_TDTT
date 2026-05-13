@@ -1,9 +1,10 @@
-from repositories.view_repo import view_repository
 from repositories.collection_repo import collection_repo
 from repositories.hotel_repo import hotel_repo
+from repositories.view_repo import view_repository
 from schemas.collection_schema import CollectionPublicResponse, CollectionVisibility
 from schemas.discover_schema import DiscoverHotel
 from schemas.view_schema import TopViewRequest, ViewTargetType
+
 
 class ViewService:
     def __init__(self):

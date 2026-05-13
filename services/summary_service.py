@@ -1,13 +1,21 @@
-from datetime import datetime, timedelta, timezone
+import asyncio
 import json
 import logging
 import re
-import asyncio
+import textwrap
+from datetime import datetime, timedelta, timezone
+
 from externals.OllamaSummary import ollama_client
+from schemas.discover_schema import (
+    AIReviewSummary,
+    AnalyzedReview,
+    DiscoverHotel,
+    NearbyPlace,
+    WeatherInfo,
+)
 from services.hotel_ranking_service import hotel_ranking_service
 from services.weather_service import weather_service
-from schemas.discover_schema import AnalyzedReview, DiscoverHotel, NearbyPlace, AIReviewSummary, WeatherInfo
-import textwrap
+
 logger = logging.getLogger(__name__)
 SUMMARY_CACHE_EXPIRATION_DAYS = 14 
 

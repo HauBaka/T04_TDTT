@@ -1,12 +1,14 @@
 from fastapi import Header
 from firebase_admin import auth
 from firebase_admin.auth import (
-    InvalidIdTokenError,
+    CertificateFetchError,
     ExpiredIdTokenError,
+    InvalidIdTokenError,
     RevokedIdTokenError,
-    CertificateFetchError
 )
+
 from core.exceptions import UnauthorizedError
+
 
 def get_current_user(optional: bool = False):
     async def dependency(authorization: str | None = Header(None)):

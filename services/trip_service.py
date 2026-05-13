@@ -1,12 +1,26 @@
 
 from loguru import logger
 
-from core.exceptions import AppException, BadRequestError, NotFoundError, PermissionDeniedError
+from core.exceptions import (
+    AppException,
+    BadRequestError,
+    NotFoundError,
+    PermissionDeniedError,
+)
 from repositories.hotel_repo import hotel_repo
-from schemas.response_schema import ResponseSchema
-from schemas.trip_schema import TripMemberResponse, TripCreateRequest, TripDocument, TripPlaceResponse, TripResponse, TripStatus, TripUpdateRequest
 from repositories.trip_repo import trip_repo
 from repositories.user_repo import user_repo
+from schemas.response_schema import ResponseSchema
+from schemas.trip_schema import (
+    TripCreateRequest,
+    TripDocument,
+    TripMemberResponse,
+    TripPlaceResponse,
+    TripResponse,
+    TripStatus,
+    TripUpdateRequest,
+)
+
 
 class TripService:
     """Service xử lý logic nghiệp vụ liên quan đến Trip."""
@@ -156,7 +170,7 @@ class TripService:
         trip = await self.trip_repo.get_by_id(trip_id)
         
         # Chỉ member mới được xem danh sách thành viên
-        trip_members_info = await self.trip_repo.get_members(trip_id)
+        trip_members_info = await self.trip_repo.get_members(trip.id)
         member_uids = [m.uid for m in trip_members_info]
         if requester_uid not in member_uids:
             raise PermissionDeniedError(message="You do not have permission to view members of this trip.")

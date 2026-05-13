@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
-from schemas.response_schema import ResponseSchema
-from core.dependencies import get_current_user
 
+from core.dependencies import get_current_user
+from schemas.response_schema import ResponseSchema
 
 hotel_router = APIRouter()
 

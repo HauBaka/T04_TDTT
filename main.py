@@ -1,31 +1,34 @@
 import time
+
+import httpx
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.concurrency import asynccontextmanager
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from api.health import health_router
-from api.discover import discover_router
-from api.auth import auth_router
-from api.user import user_router
-from api.collection import collection_router
-from api.invitation import invitation_router
-from api.notification import notification_router
-from api.conversation import conversation_router
-from api.trip import trip_router
-from api.view import view_router
-from api.upload import upload_router
-from core.database import firebase_manager
-from core.exceptions import AppException
-from core.limiter import limiter, AutoRateLimitMiddleware
-from slowapi.middleware import SlowAPIMiddleware
-from mock_data.virtual_review import virtual_review_manager
-from externals.PhoBERT import PhoBERT
-from externals.SemanticModel import semantic_model_client
 from loguru import logger
+from slowapi.middleware import SlowAPIMiddleware
 
 import core.http_client as http_client
-import httpx
+from api.auth import auth_router
+from api.collection import collection_router
+from api.conversation import conversation_router
+from api.discover import discover_router
+from api.health import health_router
+from api.invitation import invitation_router
+from api.notification import notification_router
+from api.trip import trip_router
+from api.upload import upload_router
+from api.user import user_router
+from api.view import view_router
+from core.database import firebase_manager
+from core.exceptions import AppException
+from core.limiter import AutoRateLimitMiddleware, limiter
+from externals.PhoBERT import PhoBERT
+from externals.SemanticModel import semantic_model_client
+from mock_data.virtual_review import virtual_review_manager
+
+
 # Khởi tạo các thành phần cần thiết
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -67,7 +70,7 @@ async def log_requests(request: Request, call_next):
     try:
         response = await call_next(request)
         status_code = response.status_code
-    except Exception as e:
+    except Exception:
         status_code = 500
         logger.exception(f"Request failed: {request.method} {request.url.path}")
         raise

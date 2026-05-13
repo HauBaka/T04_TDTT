@@ -1,7 +1,9 @@
 from google import genai
 from loguru import logger
-from utils.beauty_json import beauty_json
+
 from core.settings import settings
+from utils.beauty_json import beauty_json
+
 
 class GeminiClient:
     def __init__(self):

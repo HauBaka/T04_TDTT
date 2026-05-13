@@ -11,6 +11,7 @@ from schemas.user_preference_schema import (
     UserTravelPreference,
 )
 
+
 class HotelRankingRequest(BaseModel):
     hotels: list[DiscoverHotel]
     profile: UserTravelPreference

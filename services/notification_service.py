@@ -1,9 +1,14 @@
 
 from datetime import datetime
 
-from schemas.notification_schema import NotificationResponse, NotificationType, UpdateNotificationRequest
-from schemas.response_schema import ResponseSchema
 from repositories.notification_repo import notification_repo
+from schemas.notification_schema import (
+    NotificationResponse,
+    NotificationType,
+    UpdateNotificationRequest,
+)
+from schemas.response_schema import ResponseSchema
+
 
 class NotificationService:
     def __init__(self):

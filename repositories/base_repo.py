@@ -1,10 +1,10 @@
 import asyncio
 
-from core.database import get_db
 from google.cloud.exceptions import NotFound
-from core.exceptions import DatabaseError, NotFoundError, ValidationError
-
 from loguru import logger
+
+from core.database import get_db
+from core.exceptions import DatabaseError, NotFoundError, ValidationError
 
 MAX_IN_QUERY = 30
 class BaseRepository:

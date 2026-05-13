@@ -1,16 +1,19 @@
-from fastapi import APIRouter
-from fastapi import Depends
+from fastapi import APIRouter, Depends
+
 from core.dependencies import get_current_user
-from schemas.collection_schema import CollectionPrivateResponse, CollectionPublicResponse
-from schemas.conversation_schema import ConversationResponse
-from services.user_service import user_service
-from schemas.user_schema import (
-    UserSaveCollectionRequest,
-    UserUpdateRequest, 
-    UserPrivateResponse, 
-    UserPublicResponse, 
+from schemas.collection_schema import (
+    CollectionPrivateResponse,
+    CollectionPublicResponse,
 )
+from schemas.conversation_schema import ConversationResponse
 from schemas.response_schema import ResponseSchema
+from schemas.user_schema import (
+    UserPrivateResponse,
+    UserPublicResponse,
+    UserSaveCollectionRequest,
+    UserUpdateRequest,
+)
+from services.user_service import user_service
 
 user_router = APIRouter()
 

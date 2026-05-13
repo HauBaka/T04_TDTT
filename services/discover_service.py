@@ -1,16 +1,25 @@
+import asyncio
+
+from loguru import logger
+
 from core.exceptions import *
-from schemas.discover_schema import AddressSuggestion, AddressSuggestionRequest, AddressSuggestionResponse, DiscoverRequest, DiscoverHotel, WeatherInfo
-from schemas.response_schema import ResponseSchema
-from schemas.response_schema import ResponseSchema
-from services.sentiment_service import sentiment_service
-from services.weather_service import weather_service
-from services.hotel_ranking_service import hotel_ranking_service
-from mock_data.virtual_review import virtual_review_manager
 from externals.SerpAPI import serp_api
 from externals.VietMapAPI import vietmap_api
+from mock_data.virtual_review import virtual_review_manager
 from repositories.hotel_repo import hotel_repo
-from loguru import logger
-import asyncio
+from schemas.discover_schema import (
+    AddressSuggestion,
+    AddressSuggestionRequest,
+    AddressSuggestionResponse,
+    DiscoverHotel,
+    DiscoverRequest,
+    WeatherInfo,
+)
+from schemas.response_schema import ResponseSchema
+from services.hotel_ranking_service import hotel_ranking_service
+from services.sentiment_service import sentiment_service
+from services.weather_service import weather_service
+
 
 class DiscoverService:
     def __init__(self, payload: DiscoverRequest, requester_uid: str | None = None):

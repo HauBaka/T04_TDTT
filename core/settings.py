@@ -1,6 +1,7 @@
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
 class Settings(BaseSettings):
     FIREBASE_CREDENTIAL: SecretStr
     SERP_API_KEY: SecretStr

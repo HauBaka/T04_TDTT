@@ -1,8 +1,11 @@
-import pandas as pd
 import random
 from pathlib import Path
-from schemas.discover_schema import DiscoverHotel, UserReview
+
+import pandas as pd
 from loguru import logger
+
+from schemas.discover_schema import DiscoverHotel, UserReview
+
 
 class VirtualReview:
     def __init__(self):
