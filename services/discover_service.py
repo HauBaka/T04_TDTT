@@ -1,5 +1,7 @@
 from core.exceptions import *
-from schemas.discover_schema import DiscoverRequest, DiscoverHotel, WeatherInfo
+from schemas.discover_schema import AddressSuggestion, AddressSuggestionRequest, AddressSuggestionResponse, DiscoverRequest, DiscoverHotel, WeatherInfo
+from schemas.response_schema import ResponseSchema
+from schemas.response_schema import ResponseSchema
 from services.sentiment_service import sentiment_service
 from services.summary_service import summary_service
 from services.weather_service import weather_service
@@ -103,3 +105,26 @@ class DiscoverService:
             hotel_repo.sync_hotels_background(raw_results) 
         )
         return raw_results
+    
+    @staticmethod
+    async def suggest_addresses(query: AddressSuggestionRequest) -> ResponseSchema[AddressSuggestionResponse]:
+        """Gợi ý địa chỉ dựa trên query đầu vào"""
+        try:
+            autocomplete_result = await vietmap_api.autocomplete(query.query, query.gps)
+            if not autocomplete_result or not autocomplete_result.data:
+                return ResponseSchema[AddressSuggestionResponse](data=AddressSuggestionResponse(suggestions=[]))
+            
+            suggestions = []
+            for item in autocomplete_result.data:
+                suggestion = AddressSuggestion(
+                    address=item.address,
+                    name=item.name,
+                    display=item.display,
+                    distance=item.distance,
+                    ref_id=item.ref_id
+                )
+                suggestions.append(suggestion)
+            return ResponseSchema[AddressSuggestionResponse](data=AddressSuggestionResponse(suggestions=suggestions))
+        except Exception as exc:
+            logger.error(f"Error in suggest_addresses: {str(exc)}")
+            raise AppException("Failed to get address suggestions", status_code=500)

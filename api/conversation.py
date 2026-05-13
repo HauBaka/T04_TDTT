@@ -1,5 +1,14 @@
 from fastapi import APIRouter, Depends, BackgroundTasks
-from schemas.conversation_schema import AddMembersRequest, ConversationCreateRequest, ConversationResponse, ConversationUpdateRequest, RemoveMembersRequest, SendMessageRequest
+from schemas.conversation_schema import (
+    AddMembersRequest, 
+    ConversationCreateRequest, 
+    ConversationUpdateRequest, 
+    RemoveMembersRequest, 
+    SendMessageRequest,
+    ConversationMemberResponse, 
+    ConversationResponse, 
+    ConversationMessageResponse, 
+)
 from schemas.response_schema import ResponseSchema
 from services.conversation_service import conversation_service
 from core.dependencies import get_current_user
@@ -9,7 +18,7 @@ conversation_router = APIRouter()
 @conversation_router.post("/conversations", response_model=ResponseSchema[ConversationResponse])
 async def create_conversation(conversation_request: ConversationCreateRequest, requester=Depends(get_current_user(optional=False))):
     """Tạo một conversation mới cho người dùng đã xác thực."""
-    return await conversation_service.create_conversation(requester.get("uid"), conversation_request.model_dump(exclude_none=True))
+    return await conversation_service.create_conversation(requester.get("uid"), conversation_request)
 
 @conversation_router.get("/conversations/{conversation_id}", response_model=ResponseSchema[ConversationResponse])
 async def get_conversation(conversation_id: str, requester=Depends(get_current_user(optional=False))):
@@ -19,7 +28,7 @@ async def get_conversation(conversation_id: str, requester=Depends(get_current_u
 @conversation_router.patch("/conversations/{conversation_id}", response_model=ResponseSchema[ConversationResponse])
 async def update_conversation(conversation_id: str, conversation_request: ConversationUpdateRequest, background_tasks: BackgroundTasks,requester=Depends(get_current_user(optional=False))):
     """Cập nhật thông tin của một conversation."""
-    return await conversation_service.update_conversation(conversation_id, requester.get("uid"), conversation_request.model_dump(exclude_none=True), background_tasks=background_tasks)
+    return await conversation_service.update_conversation(conversation_id, requester.get("uid"), conversation_request, background_tasks=background_tasks)
 
 @conversation_router.delete("/conversations/{conversation_id}", response_model=ResponseSchema[bool])
 async def delete_conversation(conversation_id: str, background_tasks: BackgroundTasks,requester=Depends(get_current_user(optional=False))):
@@ -32,18 +41,23 @@ async def add_members_to_conversation(conversation_id: str, members: AddMembersR
     """Thêm nhiều thành viên vào một conversation."""
     return await conversation_service.add_members_to_conversation(conversation_id, requester.get("uid"), members, background_tasks=background_tasks)
 
+@conversation_router.get("/conversations/{conversation_id}/members", response_model=ResponseSchema[list[ConversationMemberResponse]])
+async def get_members_from_conversation(conversation_id: str, requester=Depends(get_current_user(optional=False))):
+    """Lấy danh sách chi tiết thành viên từ một conversation."""
+    return await conversation_service.get_members_from_conversation(conversation_id, requester.get("uid"))
+
 @conversation_router.delete("/conversations/{conversation_id}/members", response_model=ResponseSchema[ConversationResponse])
 async def remove_members_from_conversation(conversation_id: str, members: RemoveMembersRequest, requester=Depends(get_current_user(optional=False))):
     """Xóa nhiều thành viên khỏi một conversation."""
     return await conversation_service.remove_members_from_conversation(conversation_id, requester.get("uid"), members.member_uids)
 
 # --- QUẢN LÝ TIN NHẮN (MESSAGES) & UNREAD STATUS ---
-@conversation_router.post("/conversations/{conversation_id}/messages", response_model=ResponseSchema[ConversationResponse])
+@conversation_router.post("/conversations/{conversation_id}/messages", response_model=ResponseSchema[ConversationMessageResponse])
 async def send_message_to_conversation(conversation_id: str, message_request: SendMessageRequest,  background_tasks: BackgroundTasks, requester=Depends(get_current_user(optional=False))):
     """Gửi một tin nhắn mới vào một conversation."""
     return await conversation_service.send_message_to_conversation(conversation_id, requester.get("uid"), message_request, background_tasks=background_tasks)
 
-@conversation_router.delete("/conversations/{conversation_id}/messages/{message_id}", response_model=ResponseSchema[ConversationResponse])
+@conversation_router.delete("/conversations/{conversation_id}/messages/{message_id}", response_model=ResponseSchema[bool])
 async def delete_message_from_conversation(conversation_id: str, message_id: str, requester=Depends(get_current_user(optional=False))):
     """Xóa một tin nhắn cụ thể khỏi một conversation."""
     return await conversation_service.delete_message_from_conversation(conversation_id, message_id, requester.get("uid"))

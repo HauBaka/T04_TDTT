@@ -1,9 +1,9 @@
 from __future__ import annotations
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from datetime import datetime, timezone
-from typing import Annotated
+from typing import Annotated, Optional
 from schemas.trip_context_schema import TravelStyle, TripSearchCriteria
-
+from schemas.view_schema import ViewResponse
 # ==============================
 # CÁC CLASS REQUEST & VALIDATION
 # ==============================
@@ -161,5 +161,55 @@ class DiscoverHotel(BaseModel):
     # updates
     last_updated: datetime | None = None
 
+    # views
+    views: ViewResponse = Field(default_factory=ViewResponse)
+
 class DiscoverResponse(BaseModel):
     data: list[DiscoverHotel] # Danh sách các khách sạn phù hợp, mỗi khách sạn là một dict với thông tin chi tiết
+
+class HotelDocument(BaseModel):
+    """hotels/{property_token}"""
+    model_config = ConfigDict(from_attributes=True)
+
+    property_token: str
+    name: str
+    description: str | None = None
+    link: str | None = None
+    address: str | None = None
+    phone: str | None = None
+    gps_coordinates: GPSCoordinates | None = None
+    nearby_places: list[NearbyPlace] = []
+
+    check_in_time: str | None = None
+    check_out_time: str | None = None
+
+    price: float
+    deal: str | None = None
+    booking_sources: list[BookingSource] = []
+
+    images: list[HotelImage] = [] 
+    amenities: list[str] = []
+
+    raw_rating: float = 0.0
+    user_reviews: list[UserReview] = []
+
+    ai_sentiment: AISentimentResult | None = None
+    ai_summary: AIReviewSummary | None = None
+
+    added_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    last_updated: datetime | None = None
+    
+    views: ViewResponse = Field(default_factory=ViewResponse)
+
+class AddressSuggestionRequest(BaseModel):
+    query: str
+    gps: Optional[GPSCoordinates] = None
+
+class AddressSuggestion(BaseModel):
+    address: Optional[str] = None
+    name: Optional[str] = None
+    display: Optional[str] = None
+    distance: Optional[float] = -1.0
+    ref_id: str
+class AddressSuggestionResponse(BaseModel):
+    suggestions: list[AddressSuggestion]

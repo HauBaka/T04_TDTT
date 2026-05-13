@@ -9,7 +9,7 @@ import pygeohash as pgh
 class VietMapAPI:
     def __init__(self):
         self.search_url = "https://maps.vietmap.vn/api/{type}/v4"
-        self.api_key = settings.VIETMAP_API_KEY
+        self.api_key = settings.VIETMAP_API_KEY.get_secret_value()
         self.display_type = 6
 
     async def get_status(self) -> dict:
@@ -52,8 +52,11 @@ class VietMapAPI:
         if gps:
             params["focus"] = f"{gps.latitude},{gps.longitude}"
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(self.search_url.format(type="search"), params=params)
+        headers = {
+            "Accept": "application/json"
+        }
+        async with httpx.AsyncClient(headers=headers) as client:
+            response = await client.get(self.search_url.format(type="autocomplete"), params=params, headers=headers)
             if response.status_code == 200:
                 data = response.json()
 
@@ -64,7 +67,7 @@ class VietMapAPI:
                         address=item.get("address", ""),
                         display=item.get("display", ""),
                         ref_id=item.get("ref_id", ""),
-                        distance=item.get("distance", None)
+                        distance=item.get("distance", -1.0)
                     )
                     results.append(result)
 

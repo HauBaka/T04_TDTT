@@ -6,7 +6,7 @@ from core.settings import settings
 
 class GeminiClient:
     def __init__(self):
-        self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        self.client = genai.Client(api_key=settings.GEMINI_API_KEY.get_secret_value())
         self.default_model = 'gemini-2.5-flash'
 
     def generate_content(self, prompt: str) -> str | None:
