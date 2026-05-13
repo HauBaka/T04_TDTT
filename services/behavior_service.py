@@ -4,7 +4,11 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 from repositories.behavior_event_repo import behavior_event_repo
-from schemas.user_behavior_schema import UserBehaviorEvent, UserEventType
+from schemas.user_behavior_schema import (
+    UserBehaviorEventCreateRequest,
+    GetRecentBehaviourEventRequest,
+    UserBehaviorEventDocument
+)
 
 
 class BehaviorService:
@@ -14,42 +18,39 @@ class BehaviorService:
         """Khởi tạo service với repository implementation."""
         self.repo = behavior_event_repo
         
-    async def record_event(
-        self,
-        user_id: str,
-        event_type: UserEventType,
-        target_id: str | None = None,
-        target_name: str | None = None,
-        metadata: dict[str, str] | None = None,
-        source: str | None = None,
-    ) -> str:
+    async def record_event(self,user_uid: str, request: UserBehaviorEventCreateRequest) -> str:
         """Ghi nhận một sự kiện hành vi của người dùng."""
         event_id = uuid.uuid4().hex
-        meta = metadata.copy() if metadata else {}
-        if source:
-            meta["source"] = source
-        event = UserBehaviorEvent(
+        
+        meta = request.metadata.copy() if request.metadata else {}
+        if request.source:
+            meta["source"] = request.source
+            
+        event = UserBehaviorEventDocument(
             id=event_id,
-            user_id=user_id,
-            event_type=event_type,
-            target_id=target_id,
-            target_name=target_name,
+            user_uid=user_uid,
+            event_type=request.event_type,
+            target_id=request.target_id,
+            target_name=request.target_name,
             metadata=meta
         )
         return await self.repo.create_event(event)
+        
 
     async def get_recent_events(
         self,
-        user_id: str,
-        limit: int = 100,
-        last_doc=None,
-    ) -> list[UserBehaviorEvent]:
+        request: GetRecentBehaviourEventRequest
+    ) -> list[UserBehaviorEventDocument]:
         """Lấy các events gần đây nhất của user."""
-        return await self.repo.list_events_for_user(user_id, limit=limit, last_doc=last_doc)
+        return await self.repo.list_events_for_user(
+            user_uid=request.user_id,
+            limit=request.limit,
+            last_doc=request.last_doc
+        )
 
-    async def get_event_count(self, user_id: str) -> int:
+    async def get_event_count(self, user_uid: str) -> int:
         """Đếm tổng số events của user."""
-        return await self.repo.count_events_for_user(user_id)
+        return await self.repo.count_events_for_user(user_uid=user_uid)
 
     async def delete_event(self, event_id: str) -> bool:
         """Xóa một event cụ thể (GDPR right to be forgotten)."""
