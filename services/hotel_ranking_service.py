@@ -930,7 +930,10 @@ class HotelRankingService:
 
                 # Fetch user behavior history from behavior_service
                 try:
-                    history = behavior_service.get_recent_events(requester_uid, limit=30)
+                    history = await behavior_service.get_recent_events(
+                        requester_uid,
+                        limit=30,
+                    )
                 except Exception as exc:
                     logger.warning(f"Failed to fetch behavior history for {requester_uid}: {str(exc)}")
                     history = []

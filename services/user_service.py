@@ -7,8 +7,10 @@ from repositories.collection_repo import collection_repo
 from schemas.conversation_schema import ConversationResponse
 from schemas.user_schema import UserCollectionsResponse, UserPublicResponse, UserPrivateResponse, UserSaveCollectionRequest, UserUpdateRequest
 from schemas.collection_schema import CollectionPrivateResponse, CollectionPublicResponse
+from schemas.user_behavior_schema import UserBehaviorEventCreateRequest, UserEventType
 from schemas.view_schema import ViewResponse
 from schemas.response_schema import ResponseSchema
+from services.behavior_service import behavior_service
 from loguru import logger
 from pydantic import ValidationError as PydanticValidationError
 ALLOWED_UPDATE_FIELDS = {"display_name", "username", "email", "phone_number", "bio", "avatar_url"}
@@ -181,6 +183,17 @@ class UserService:
             collection_repo.add_saver(collection.collection_id, requester_uid)
         )
 
+        await behavior_service.record_event(
+            requester_uid,
+            UserBehaviorEventCreateRequest(
+                event_type=UserEventType.SAVE_COLLECTION,
+                target_id=collection_doc.id,
+                target_name=collection_doc.name,
+                metadata={"target_type": "collection"},
+                source="user_service",
+            ),
+        )
+
         return ResponseSchema(status_code=200, message="Collection saved successfully", data=True)
 
     async def unsave_collection(self, requester_uid: str, collection_id: str) -> ResponseSchema[bool]:
@@ -195,6 +208,17 @@ class UserService:
         await asyncio.gather(
             self.user_repo.unsave_collection(requester_uid, collection_id),
             collection_repo.remove_saver(collection_id, requester_uid)
+        )
+
+        await behavior_service.record_event(
+            requester_uid,
+            UserBehaviorEventCreateRequest(
+                event_type=UserEventType.REMOVE_COLLECTION,
+                target_id=collection_doc.id,
+                target_name=collection_doc.name,
+                metadata={"target_type": "collection"},
+                source="user_service",
+            ),
         )
 
         return ResponseSchema(status_code=200, message="Collection unsaved successfully", data=True)

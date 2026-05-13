@@ -3,7 +3,9 @@ from repositories.collection_repo import collection_repo
 from repositories.hotel_repo import hotel_repo
 from schemas.collection_schema import CollectionPublicResponse, CollectionVisibility
 from schemas.discover_schema import DiscoverHotel
+from schemas.user_behavior_schema import UserBehaviorEventCreateRequest, UserEventType
 from schemas.view_schema import TopViewRequest, ViewTargetType
+from services.behavior_service import behavior_service
 
 class ViewService:
     def __init__(self):
@@ -30,5 +32,16 @@ class ViewService:
                 return
             
         await self.view_repository.add_view(viewer_id, target_id, target_type)
+
+        await behavior_service.record_event(
+            viewer_id,
+            UserBehaviorEventCreateRequest(
+                event_type=UserEventType.VIEW,
+                target_id=target_id,
+                target_name=str(target_type.value),
+                metadata={"target_type": str(target_type.value)},
+                source="view_service",
+            ),
+        )
 
 view_service = ViewService()

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from loguru import logger
+
 from repositories.behavior_event_repo import behavior_event_repo
 from schemas.user_behavior_schema import (
     UserBehaviorEventCreateRequest,
@@ -16,17 +18,24 @@ class BehaviorService:
         """Khởi tạo service với repository implementation."""
         self.repo = behavior_event_repo
         
-    async def record_event(self,user_uid: str, request: UserBehaviorEventCreateRequest) -> str:
-        """Ghi nhận một sự kiện hành vi của người dùng."""
-        return await self.repo.create_event(user_uid, request)
-        
+    async def record_event(self, user_uid: str, request: UserBehaviorEventCreateRequest) -> str | None:
+        """Ghi event theo kiểu best-effort để không làm fail luồng nghiệp vụ chính."""
+        try:
+            return await self.repo.create_event(user_uid, request)
+        except Exception as exc:
+            logger.warning(f"Failed to record behavior event for user {user_uid}: {str(exc)}")
+            return None
 
     async def get_recent_events(
         self,
-        request: GetRecentBehaviourEventRequest
+        user_uid: str,
+        limit: int = 100,
     ) -> list[UserBehaviorEventDocument]:
         """Lấy các events gần đây nhất của user."""
-        return await self.repo.list_events_for_user(request)
+        return await self.repo.list_events_for_user(
+            GetRecentBehaviourEventRequest(user_uid=user_uid, limit=limit)
+        )
+
     async def get_event_count(self, user_uid: str) -> int:
         """Đếm tổng số events của user."""
         return await self.repo.count_events_for_user(user_uid=user_uid)
