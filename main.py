@@ -1,4 +1,6 @@
+import time
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.concurrency import asynccontextmanager
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -11,8 +13,12 @@ from api.invitation import invitation_router
 from api.notification import notification_router
 from api.conversation import conversation_router
 from api.trip import trip_router
+from api.view import view_router
+from api.upload import upload_router
 from core.database import firebase_manager
 from core.exceptions import AppException
+from core.limiter import limiter, AutoRateLimitMiddleware
+from slowapi.middleware import SlowAPIMiddleware
 from mock_data.virtual_review import virtual_review_manager
 from externals.PhoBERT import PhoBERT
 from externals.SemanticModel import semantic_model_client
@@ -24,7 +30,7 @@ import httpx
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Khởi tạo Firebase
-    firebase_manager.initialize() 
+    await firebase_manager.initialize() 
     # Khởi tạo Virtual Review 
     try:
         virtual_review_manager.initialize("mock_data/user_reviews.csv")
@@ -43,6 +49,37 @@ async def lifespan(app: FastAPI):
         await http_client._http_client.aclose()
 
 app = FastAPI(lifespan=lifespan)
+app.state.limiter = limiter
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+app.add_middleware(SlowAPIMiddleware)
+app.add_middleware(AutoRateLimitMiddleware)
+# Middleware để log thông tin request và response
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start = time.time()
+
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+    except Exception as e:
+        status_code = 500
+        logger.exception(f"Request failed: {request.method} {request.url.path}")
+        raise
+    finally:
+        process_time = (time.time() - start) * 1000
+        logger.info(
+            f"{request.method} {request.url.path} "
+            f"status={status_code} "
+            f"time={process_time:.2f}ms"
+        )
+
+    return response
 # Đăng ký router
 app.include_router(health_router, tags=["health"])
 app.include_router(discover_router, tags=["discover"])
@@ -53,6 +90,8 @@ app.include_router(invitation_router, tags=["invitation"])
 app.include_router(notification_router, tags=["notification"])
 app.include_router(conversation_router, tags=["conversation"])
 app.include_router(trip_router, tags=["trip"])
+app.include_router(view_router, tags=["view"])
+app.include_router(upload_router, tags=["uploads"])
 # Xử lý các lỗi
 @app.exception_handler(AppException) # Xử lý lỗi ứng dụng
 async def app_exception_handler(request: Request, exc: AppException):
