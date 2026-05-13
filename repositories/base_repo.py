@@ -1,10 +1,6 @@
 import asyncio
 
 from core.database import get_db
-from google.cloud.firestore_v1.field_path import FieldPath
-from google.cloud.firestore_v1.base_query import FieldFilter
-from google.cloud.firestore_v1.async_document import AsyncDocumentReference
-from google.cloud.firestore_v1.base_document import DocumentSnapshot
 from google.cloud.exceptions import NotFound
 from core.exceptions import DatabaseError, NotFoundError, ValidationError
 

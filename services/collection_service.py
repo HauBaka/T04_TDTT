@@ -7,8 +7,6 @@ from repositories.collection_repo import collection_repo
 from core.exceptions import AppException, BadRequestError, NotFoundError, PermissionDeniedError
 from schemas.response_schema import ResponseSchema
 from schemas.view_schema import ViewResponse
-from services.invitation_service import invitation_service
-from services.notification_service import notification_service
 
 class CollectionService:
     def __init__(self):

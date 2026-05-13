@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from core.exceptions import AppException
 from schemas.discover_schema import AddressSuggestionRequest, AddressSuggestionResponse, DiscoverRequest
 from schemas.response_schema import ResponseSchema

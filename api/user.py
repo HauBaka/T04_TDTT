@@ -7,7 +7,6 @@ from services.user_service import user_service
 from schemas.user_schema import (
     UserSaveCollectionRequest,
     UserUpdateRequest, 
-    UserCollectionsResponse,
     UserPrivateResponse, 
     UserPublicResponse, 
 )

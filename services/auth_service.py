@@ -1,7 +1,7 @@
 from repositories.user_repo import user_repo
 from schemas.auth_schema import AuthResponse
 from schemas.response_schema import ResponseSchema
-from core.exceptions import AppException, InternalServerError, NotFoundError
+from core.exceptions import InternalServerError, NotFoundError
 from datetime import datetime, timezone
 import uuid
 from repositories.collection_repo import collection_repo

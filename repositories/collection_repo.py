@@ -4,7 +4,7 @@ from google.cloud.firestore_v1.base_query import FieldFilter
 from loguru import logger
 from pydantic import ValidationError as PydanticValidationError
 
-from core.exceptions import NotFoundError, ValidationError
+from core.exceptions import ValidationError
 from repositories.user_repo import user_repo
 from repositories.hotel_repo import hotel_repo
 from repositories.base_repo import BaseRepository

@@ -3,7 +3,6 @@ import json
 import logging
 import re
 import asyncio
-from externals.Gemini import gemini_client
 from externals.OllamaSummary import ollama_client
 from services.hotel_ranking_service import hotel_ranking_service
 from services.weather_service import weather_service

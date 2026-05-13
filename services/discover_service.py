@@ -3,7 +3,6 @@ from schemas.discover_schema import AddressSuggestion, AddressSuggestionRequest,
 from schemas.response_schema import ResponseSchema
 from schemas.response_schema import ResponseSchema
 from services.sentiment_service import sentiment_service
-from services.summary_service import summary_service
 from services.weather_service import weather_service
 from services.hotel_ranking_service import hotel_ranking_service
 from mock_data.virtual_review import virtual_review_manager

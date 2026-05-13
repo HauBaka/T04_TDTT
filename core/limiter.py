@@ -4,14 +4,13 @@ from typing import Callable, Optional, Dict
 import inspect
 
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
-from core.exceptions import RateLimitExceededError
 
 RATE_LIMITS = {
     "auth": "5/minute",

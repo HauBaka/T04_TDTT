@@ -1,7 +1,7 @@
 from pydantic import BaseModel, ConfigDict, Field
 from datetime import datetime
-from schemas.collection_schema import CollectionPrivateResponse, CollectionPublicResponse
-from schemas.user_preference_schema import ScoringWeights, UserBehaviorEvent, UserTravelPreference
+from schemas.collection_schema import CollectionPublicResponse
+from schemas.user_preference_schema import ScoringWeights, UserTravelPreference
 
 
 class UserDocument(BaseModel):

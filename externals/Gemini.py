@@ -1,5 +1,4 @@
 from google import genai
-from google.genai import errors
 from loguru import logger
 from utils.beauty_json import beauty_json
 from core.settings import settings

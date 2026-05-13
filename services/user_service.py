@@ -5,7 +5,7 @@ from repositories.conversation_repo import conversation_repo
 from repositories.user_repo import user_repo
 from repositories.collection_repo import collection_repo
 from schemas.conversation_schema import ConversationResponse
-from schemas.user_schema import UserCollectionsResponse, UserPublicResponse, UserPrivateResponse, UserSaveCollectionRequest, UserUpdateRequest
+from schemas.user_schema import UserPublicResponse, UserPrivateResponse, UserSaveCollectionRequest, UserUpdateRequest
 from schemas.collection_schema import CollectionPrivateResponse, CollectionPublicResponse
 from schemas.view_schema import ViewResponse
 from schemas.response_schema import ResponseSchema
