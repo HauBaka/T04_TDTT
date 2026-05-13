@@ -40,7 +40,7 @@ class WeatherOpenMeteo:
 
     async def search(self, lat: float, lng: float, start_date: str, end_date: str) -> list[WeatherInfo]:
         """Gọi API Open-Meteo lấy dữ liệu thô và ép kiểu sang Schema"""
-        params = {
+        params: dict[str, str | int | float | bool | None] = {
             "latitude": lat,
             "longitude": lng,
             "daily": "weather_code,temperature_2m_max,precipitation_probability_max",

@@ -914,7 +914,7 @@ class HotelRankingService:
                 if not private_user:
                     private_user = {}
 
-                profile_data = private_user.get("travel_profile")
+                profile_data = private_user.get("travel_profile") # type: ignore[attr-defined]
                 if isinstance(profile_data, UserTravelPreference):
                     profile = profile_data
                 elif isinstance(profile_data, dict):

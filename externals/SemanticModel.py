@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 from loguru import logger
-from transformers import AutoModel, AutoTokenizer
+from transformers import (
+	AutoModel,
+	AutoTokenizer,
+	PreTrainedModel,
+	PreTrainedTokenizerBase,
+)
 
 
 class SemanticModelClient:
 	def __init__(self, model_name: str = "intfloat/multilingual-e5-small"):
 		self.model_name = model_name
-		self._tokenizer = None
-		self._model = None
+		self._tokenizer: PreTrainedTokenizerBase | None = None
+		self._model: PreTrainedModel | None = None
 
 	def load_model(self) -> None:
 		"""Tải mô hình semantic vào bộ nhớ. Nếu đã tải rồi thì không làm gì."""
@@ -17,9 +22,11 @@ class SemanticModelClient:
 
 		try:
 			logger.info(f"Loading semantic model '{self.model_name}'...")
-			self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-			self._model = AutoModel.from_pretrained(self.model_name)
-			self._model.eval()
+			tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+			model = AutoModel.from_pretrained(self.model_name)
+			model.eval()
+			self._tokenizer = tokenizer
+			self._model = model
 			logger.info(f"Semantic model ready: {self.model_name}")
 		except Exception as exc:
 			self._tokenizer = None
