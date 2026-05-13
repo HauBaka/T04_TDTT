@@ -1,11 +1,12 @@
 from __future__ import annotations
 import logging
+import uuid
 from datetime import datetime
-
+from pydantic import ValidationError as PydanticValidationError
 from google.cloud.firestore_v1 import FieldFilter, Query
 from repositories.base_repo import BaseRepository
-from core.exceptions import NotFoundError, AppException
-from schemas.user_behavior_schema import UserBehaviorEventDocument
+from core.exceptions import NotFoundError, AppException, InternalServerError, BadRequestError
+from schemas.user_behavior_schema import UserBehaviorEventDocument,GetRecentBehaviourEventRequest,UserBehaviorEventCreateRequest
 
 logger = logging.getLogger(__name__)
 
@@ -14,24 +15,46 @@ class BehaviorEventRepo(BaseRepository):
 
     """Interface tối thiểu cho persistence layer của behavior events."""
     def __init__(self):
-        super().__init__("user_behavior_events")
-    async def create_event(self, event: UserBehaviorEventDocument) -> str:
+        super().__init__("users")
+        self._subcol_name = "behavior_events"
+        
+    def _user_events_ref(self, user_uid: str):
+        """Hàm phụ trợ lấy reference đến thư mục behavior_events của 1 user cụ thể"""
+        return self._collection.document(user_uid).collection(self._subcol_name)  
+    
+    async def create_event(self, user_uid: str, request: UserBehaviorEventCreateRequest) -> str:
         """Lưu một event vào Firestore, trả về document ID."""
+        event_id = uuid.uuid4().hex
+        meta = request.metadata.copy() if request.metadata else {}
+        if request.source:
+            meta["source"] = request.source
+            
+        event = UserBehaviorEventDocument(
+            id=event_id,
+            user_uid=user_uid,
+            event_type=request.event_type,
+            target_id=request.target_id,
+            target_name=request.target_name,
+            metadata=meta
+        )
+        
         event_data = event.model_dump(exclude={"id"})
-        return await self._create(event_data,doc_id = event.id or None)
+        ref = self._user_events_ref(user_uid).document(event.id)
+        await ref.set(event_data)
+        return ref.id
     
 
     async def list_events_for_user(
-        self, user_uid: str, limit: int = 100, last_doc = None
+        self, request: GetRecentBehaviourEventRequest
     ) -> list[UserBehaviorEventDocument]:
         """Lấy danh sách events của user, sắp xếp theo created_at DESC."""
         query = (
-            self._collection.where(filter=FieldFilter("user_uid", "==", user_uid))
+            self._user_events_ref(request.user_uid) 
             .order_by("created_at", direction=Query.DESCENDING)
-            .limit(limit)
+            .limit(request.limit)
         )
-        if last_doc:
-            query = query.start_after(last_doc)
+        if request.last_doc:
+            query = query.start_after(request.last_doc)
             
         docs = await query.get()
         events: list[UserBehaviorEventDocument] = []
@@ -40,37 +63,42 @@ class BehaviorEventRepo(BaseRepository):
             data = doc.to_dict()
             if data:
                 data["id"] = doc.id
-                events.append(UserBehaviorEventDocument.model_validate(data))
             try:
                 events.append(UserBehaviorEventDocument.model_validate(data))
-            except Exception as e:
-                logger.error(f"Lỗi validate event {doc.id}: {e}")
+            except PydanticValidationError as e:
+                logger.error(f"Validation error for event {doc.id}: {e}")
+                continue
         return events
 
-    async def get_event_by_id(self, event_id: str) -> UserBehaviorEventDocument | None:
+    async def get_event_by_id(self, user_uid: str, event_id: str) -> UserBehaviorEventDocument:
         """Lấy một event cụ thể theo ID."""
-        data = await self._get_by_id(event_id)
+        doc = await self._user_events_ref(user_uid).document(event_id).get()
+        data = doc.to_dict() if doc.exists else None
+        
         if not data:
-            raise NotFoundError(f"Event id {event_id} không tồn tại")
+            raise NotFoundError(message=f"Event ID {event_id} not found")
+            
         try:
+            data["id"] = doc.id
             return UserBehaviorEventDocument.model_validate(data)
-        except Exception as e:
-            logger.error(f"Lỗi validate event {event_id}: {e}")
-            raise AppException(status_code=500, message="Lỗi cấu trúc dữ liệu từ database")
+        except PydanticValidationError as e:
+            logger.error(f"Validation error for event {event_id}: {e}")
+            raise InternalServerError(message="Invalid data structure from database")
 
-    async def delete_events(self, event_ids: list[str]) -> int:
+    async def delete_events(self,user_uid: str, event_ids: list[str]) -> int:
         """Xóa nhiều event theo danh sách ID."""
         if not event_ids:
-            raise AppException(status_code=400, message="Danh sách event_ids không được rỗng")
+            raise BadRequestError(message="Event IDs list cannot be empty")
 
         deleted_count = 0
+        sub_ref = self._user_events_ref(user_uid)
 
         for i in range(0, len(event_ids), _FIRESTORE_BATCH_LIMIT):
             chunk = event_ids[i : i + _FIRESTORE_BATCH_LIMIT]
             batch = self._db.batch()
 
             for eid in chunk:
-                batch.delete(self._collection.document(eid))
+                batch.delete(sub_ref.document(eid))
 
             await batch.commit()
             deleted_count += len(chunk)
@@ -80,8 +108,7 @@ class BehaviorEventRepo(BaseRepository):
     async def count_events_for_user(self, user_uid: str) -> int:
         """Đếm tổng số events của user."""
         agg_query = (
-            self._collection
-            .where(filter=FieldFilter("user_uid", "==", user_uid))
+            self._user_events_ref(user_uid)
             .count(alias="total_events")
         )
         snapshot = await agg_query.get()
@@ -89,7 +116,7 @@ class BehaviorEventRepo(BaseRepository):
         try:
             return snapshot[0][0].value
         except (IndexError, AttributeError):
-            logger.warning("Unexpected aggregation response for user_uid=%s", user_uid)
+            logger.warning(f"Unexpected aggregation response for user_uid={user_uid}")
             return 0
 
     async def purge_older_than(self, cutoff_iso: str) -> int:
@@ -99,8 +126,7 @@ class BehaviorEventRepo(BaseRepository):
         except ValueError as e:
             logger.error(f"Invalid cutoff_iso format: {cutoff_iso}. Error: {e}")
             return 0
-        query = self._collection.where(filter=FieldFilter("created_at", "<", cutoff_dt))
-
+        query = self._db.collection_group(self._subcol_name).where(filter=FieldFilter("created_at", "<", cutoff_dt))
         deleted_count = 0
         batch = self._db.batch()
         batch_ops = 0

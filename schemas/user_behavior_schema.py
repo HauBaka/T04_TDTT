@@ -13,7 +13,7 @@ class UserEventType(str, Enum):
     SAVE_COLLECTION = "luu_collection"
     REMOVE_COLLECTION = "xoa_collection"
 class GetRecentBehaviourEventRequest(BaseModel):
-    user_id: str
+    user_uid: str
     limit: int = 100
     last_doc: Any | None = None
 class UserBehaviorEventCreateRequest(BaseModel):
