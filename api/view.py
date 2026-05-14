@@ -15,7 +15,7 @@ async def add_view(request: Request, data: AddViewRequest, background_tasks: Bac
         forwarded_for = request.headers.get('X-Forwarded-For')
         viewer_id = forwarded_for.split(',')[0].strip() if forwarded_for else request.client.host if request.client else "anonymous"
 
-    background_tasks.add_task(view_service.add_view, viewer_id, data.target_id, data.target_type)
+    await view_service.add_view(viewer_id, data.target_id, data.target_type, background_tasks)
     return ResponseSchema(message="View added successfully")
 
 @view_router.get("/views/top", response_model=ResponseSchema)

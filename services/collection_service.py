@@ -1,5 +1,6 @@
 from google.cloud import firestore as fs
 from datetime import datetime, timezone
+from fastapi import BackgroundTasks
 from repositories.user_repo import user_repo
 from repositories.hotel_repo import hotel_repo
 from schemas.collection_schema import  CollectionContributorResponse, CollectionDocument, CollectionPlaceResponse, CollectionPublicResponse, CollectionResponse, CollectionSaverResponse, CollectionVisibility, CollectionCreateRequest, CollectionUpdateRequest
@@ -32,7 +33,7 @@ class CollectionService:
 
         return await self.build_response(collection)
     
-    async def update_collection(self, collection_id: str, requester_id: str, update_data: CollectionUpdateRequest) -> ResponseSchema[CollectionResponse]:
+    async def update_collection(self, collection_id: str, requester_id: str, update_data: CollectionUpdateRequest, background_tasks: BackgroundTasks) -> ResponseSchema[CollectionResponse]:
         """Cập nhật thông tin của một collection. Chỉ owner mới có thể cập nhật."""
 
         # Check collection có tồn tại không
@@ -56,7 +57,7 @@ class CollectionService:
                 await collection_repo.update_collection(collection_id, update_data)
             )
         
-    async def add_places_to_collection(self, collection_id: str, requester_id: str, place_ids: list[str]) -> ResponseSchema[CollectionResponse]:
+    async def add_places_to_collection(self, collection_id: str, requester_id: str, place_ids: list[str], background_tasks: BackgroundTasks) -> ResponseSchema[CollectionResponse]:
         """Thêm nhiều địa điểm vào một collection."""
         # Check collection có tồn tại không
         collection = await collection_repo.get_collection(collection_id)
@@ -84,7 +85,8 @@ class CollectionService:
             requester_id
         )
 
-        await behavior_service.record_event(
+        background_tasks.add_task(
+            behavior_service.record_event,
             requester_id,
             UserBehaviorEventCreateRequest(
                 event_type=UserEventType.SAVE_PLACE,
@@ -110,7 +112,7 @@ class CollectionService:
         
         return ResponseSchema(data=await collection_repo.get_places_from_collection(collection_id))
 
-    async def remove_places_from_collection(self, collection_id: str, requester_id: str, place_ids: list[str]) -> ResponseSchema[CollectionResponse]:
+    async def remove_places_from_collection(self, collection_id: str, requester_id: str, place_ids: list[str], background_tasks: BackgroundTasks) -> ResponseSchema[CollectionResponse]:
         """Xóa nhiều địa điểm khỏi một collection."""
         # Check collection có tồn tại không
         collection = await collection_repo.get_collection(collection_id)
@@ -133,7 +135,8 @@ class CollectionService:
         # Xóa khỏi collection
         updated_collection = await collection_repo.remove_places_from_collection(collection_id, valid_ids)
 
-        await behavior_service.record_event(
+        background_tasks.add_task(
+            behavior_service.record_event,
             requester_id,
             UserBehaviorEventCreateRequest(
                 event_type=UserEventType.REMOVE_PLACE,
@@ -252,7 +255,7 @@ class CollectionService:
         
         return await self.build_response(updated_collection)
 
-    async def delete_collection(self, collection_id: str, requester_id: str) -> ResponseSchema[bool]:
+    async def delete_collection(self, collection_id: str, requester_id: str, background_tasks: BackgroundTasks) -> ResponseSchema[bool]:
         """Xóa một collection."""
         collection = await collection_repo.get_collection(collection_id)
         
@@ -267,7 +270,8 @@ class CollectionService:
 
         deleted = await collection_repo.delete_collection(collection_id)
         if deleted:
-            await behavior_service.record_event(
+            background_tasks.add_task(
+                behavior_service.record_event,
                 requester_id,
                 UserBehaviorEventCreateRequest(
                     event_type=UserEventType.VIEW,
@@ -342,7 +346,7 @@ class CollectionService:
         await batch.commit()
         return ResponseSchema(data=True)
 
-    async def save_collection(self, collection_id: str, requester_id: str) -> ResponseSchema[bool]:
+    async def save_collection(self, collection_id: str, requester_id: str, background_tasks: BackgroundTasks) -> ResponseSchema[bool]:
         """Lưu một collection vào danh sách đã lưu của người dùng."""
         # Check collection tồn tại
         collection = await collection_repo.get_collection(collection_id)
@@ -381,7 +385,8 @@ class CollectionService:
         
         await batch.commit()
 
-        await behavior_service.record_event(
+        background_tasks.add_task(
+            behavior_service.record_event,
             requester_id,
             UserBehaviorEventCreateRequest(
                 event_type=UserEventType.SAVE_COLLECTION,
@@ -394,7 +399,7 @@ class CollectionService:
 
         return ResponseSchema(data=True)
     
-    async def unsave_collection(self, collection_id: str, requester_id: str) -> ResponseSchema[bool]:
+    async def unsave_collection(self, collection_id: str, requester_id: str, background_tasks: BackgroundTasks) -> ResponseSchema[bool]:
         """Bỏ lưu một collection khỏi danh sách đã lưu của người dùng."""
         # Check collection tồn tại
         collection = await collection_repo.get_collection(collection_id)
@@ -430,7 +435,8 @@ class CollectionService:
         
         await batch.commit()
 
-        await behavior_service.record_event(
+        background_tasks.add_task(
+            behavior_service.record_event,
             requester_id,
             UserBehaviorEventCreateRequest(
                 event_type=UserEventType.REMOVE_COLLECTION,

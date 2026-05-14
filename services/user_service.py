@@ -1,5 +1,6 @@
 import asyncio
 
+from fastapi import BackgroundTasks
 from core.exceptions import BadRequestError, ConflictError, NotFoundError, ValidationError
 from repositories.conversation_repo import conversation_repo
 from repositories.user_repo import user_repo
@@ -169,7 +170,7 @@ class UserService:
                 data=[to_public(doc) for doc in saved_collections]
             )
     
-    async def save_collection(self, requester_uid: str, collection: UserSaveCollectionRequest) -> ResponseSchema[bool]:
+    async def save_collection(self, requester_uid: str, collection: UserSaveCollectionRequest, background_tasks: BackgroundTasks) -> ResponseSchema[bool]:
         # Check collection exists
         collection_doc = await collection_repo.get_collection(collection.collection_id)
         user_doc = await self.user_repo.get_user(requester_uid)
@@ -183,7 +184,8 @@ class UserService:
             collection_repo.add_saver(collection.collection_id, requester_uid)
         )
 
-        await behavior_service.record_event(
+        background_tasks.add_task(
+            behavior_service.record_event,
             requester_uid,
             UserBehaviorEventCreateRequest(
                 event_type=UserEventType.SAVE_COLLECTION,
@@ -196,7 +198,7 @@ class UserService:
 
         return ResponseSchema(status_code=200, message="Collection saved successfully", data=True)
 
-    async def unsave_collection(self, requester_uid: str, collection_id: str) -> ResponseSchema[bool]:
+    async def unsave_collection(self, requester_uid: str, collection_id: str, background_tasks: BackgroundTasks) -> ResponseSchema[bool]:
         # Check collection exists
         collection_doc = await collection_repo.get_collection(collection_id)
         user_doc = await self.user_repo.get_user(requester_uid)
@@ -210,7 +212,8 @@ class UserService:
             collection_repo.remove_saver(collection_id, requester_uid)
         )
 
-        await behavior_service.record_event(
+        background_tasks.add_task(
+            behavior_service.record_event,
             requester_uid,
             UserBehaviorEventCreateRequest(
                 event_type=UserEventType.REMOVE_COLLECTION,

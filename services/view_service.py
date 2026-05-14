@@ -1,3 +1,4 @@
+from fastapi import BackgroundTasks
 from repositories.view_repo import view_repository
 from repositories.collection_repo import collection_repo
 from repositories.hotel_repo import hotel_repo
@@ -16,7 +17,7 @@ class ViewService:
     async def get_top_views(self, data: TopViewRequest) -> list[CollectionPublicResponse | DiscoverHotel]:
         return await self.view_repository.get_top_views(data.target_type, limit=data.limit, page=data.page, top_type=data.top_type)
 
-    async def add_view(self, viewer_id: str, target_id: str, target_type: ViewTargetType) -> None:
+    async def add_view(self, viewer_id: str, target_id: str, target_type: ViewTargetType, background_tasks: BackgroundTasks) -> None:
         if target_type == ViewTargetType.COLLECTION:
             
             target_doc = await self.collection_repo.get_collection(target_id)
@@ -33,7 +34,8 @@ class ViewService:
             
         await self.view_repository.add_view(viewer_id, target_id, target_type)
 
-        await behavior_service.record_event(
+        background_tasks.add_task(
+            behavior_service.record_event,
             viewer_id,
             UserBehaviorEventCreateRequest(
                 event_type=UserEventType.VIEW,
