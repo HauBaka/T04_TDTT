@@ -24,11 +24,15 @@ class BehaviorEventRepo(BaseRepository):
     
     async def create_event(self, user_uid: str, request: UserBehaviorEventCreateRequest) -> str:
         """Lưu một event vào Firestore, trả về document ID."""
-        event_id = uuid.uuid4().hex
-        meta = request.metadata.copy() if request.metadata else {}
-        if request.source:
-            meta["source"] = request.source
+        if request.target_id:
+            event_id = f"{request.event_type.value}_{request.target_id}"
+        else:
+            event_id = f"{request.event_type.value}_{uuid.uuid4().hex[:8]}"
             
+        meta = request.metadata.copy() if request.metadata else {}
+        
+        if request.source:
+            meta["source"] = request.source   
         event = UserBehaviorEventDocument(
             id=event_id,
             user_uid=user_uid,
