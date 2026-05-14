@@ -15,7 +15,6 @@ from schemas.view_schema import ViewResponse
 # CÁC CLASS REQUEST & VALIDATION
 # ==============================
 class DiscoverRequest(BaseModel):
-    language: str  # để tạm
     address: str
     gps: GPSCoordinates | None = None
     ref_id: str | None = (
@@ -24,8 +23,6 @@ class DiscoverRequest(BaseModel):
 
     check_in: datetime
     check_out: datetime
-    min_price: int
-    max_price: int
     children: list[Annotated[int, Field(ge=1, le=17)]] | None = (
         None  # Tuổi của trẻ em, ví dụ: [5, 8] nếu có 2 trẻ em 5 và 8 tuổi
     )
@@ -50,23 +47,23 @@ class DiscoverRequest(BaseModel):
             raise ValueError("check_in must be before check_out.")
 
         # 2. Ràng buộc giá: min_price < max_price
-        if self.min_price >= self.max_price:
-            raise ValueError("min_price must be less than max_price.")
+        # if self.min_price >= self.max_price:
+        #     raise ValueError("min_price must be less than max_price.")
 
         # 3. Đồng bộ trip_criteria để tránh trùng/lệch dữ liệu với các field cơ bản.
         party_size = (self.adults or 0) + len(self.children or [])
 
         if self.trip_criteria is None:
             self.trip_criteria = TripSearchCriteria(
-                budget_min=self.min_price,
-                budget_max=self.max_price,
+                budget_min=0,
+                budget_max=0,
                 trip_style=self.trip_style,
                 party_size=party_size,
             )
         else:
             # Nếu FE đã gửi trip_criteria thì chuẩn hoá để match với request chính.
-            self.trip_criteria.budget_min = self.min_price
-            self.trip_criteria.budget_max = self.max_price
+            self.trip_criteria.budget_min = 0
+            self.trip_criteria.budget_max = 0
             self.trip_criteria.trip_style = self.trip_style
             self.trip_criteria.party_size = party_size
 

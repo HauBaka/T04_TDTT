@@ -247,5 +247,31 @@ class UserRepository(BaseRepository):
 
         return True
 
+    async def suggest_users(self, query: str) -> list[UserDocument]:
+        """Gợi ý người dùng dựa trên chuỗi truy vấn."""
+        if not query:
+            raise ValidationError("Query string cannot be empty")
+
+        # Tìm kiếm người dùng có username_lower khớp với truy vấn (không phân biệt hoa thường)
+        query_lower = query.lower()
+        docs = (
+            await self._collection.where(
+                filter=FieldFilter("username_lower", ">=", query_lower)
+            )
+            .where(filter=FieldFilter("username_lower", "<=", query_lower + "\uf8ff"))
+            .limit(5)
+            .get()
+        )
+
+        suggested_users = []
+        for doc in docs:
+            try:
+                user_doc = UserDocument.model_validate(doc.to_dict())
+                suggested_users.append(user_doc)
+            except PydanticValidationError as e:
+                logger.error(f"Error validating user data for uid {doc.id}: {str(e)}")
+
+        return suggested_users
+
 
 user_repo = UserRepository()

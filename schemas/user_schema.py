@@ -71,7 +71,7 @@ class UserCreateRequest(BaseModel):
 # Không cần chỉnh bật/tắt field vì phức tạp quá
 class UserPublicResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-
+    uid: str
     username: str
 
     display_name: str

@@ -34,7 +34,6 @@ class DiscoverService:
         """Gọi SerpAPI để lấy dữ liệu thô dựa trên payload đầu vào"""
         result = await serp_api.search_places(
             query=self.payload.address,
-            language=self.payload.language,
             check_in_date=self.payload.check_in.strftime("%Y-%m-%d"),
             check_out_date=self.payload.check_out.strftime("%Y-%m-%d"),
             adults=self.payload.adults,

@@ -7,7 +7,7 @@ from schemas.collection_schema import (
     CollectionPublicResponse,
 )
 from schemas.conversation_schema import ConversationResponse
-from schemas.response_schema import ResponseSchema
+from schemas.response_schema import ResponseSchema, UserPreviewResponse
 from schemas.user_schema import (
     AddFavouritePlaceRequest,
     UserPrivateResponse,
@@ -37,6 +37,14 @@ async def get_user(
     return await user_service.get_profile(
         current_user["uid"] if current_user else None, username
     )
+
+
+@user_router.get("/users", response_model=ResponseSchema[list[UserPreviewResponse]])
+async def suggest_users(
+    search: str, current_user=Depends(get_current_user(optional=True))
+):
+    """Gợi ý người dùng dựa trên chuỗi truy vấn. Trả về danh sách người dùng có username hoặc display_name khớp với truy vấn."""
+    return await user_service.suggest_users(query=search)
 
 
 @user_router.patch("/me", response_model=ResponseSchema[UserPrivateResponse])

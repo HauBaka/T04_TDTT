@@ -15,6 +15,7 @@ from schemas.collection_schema import (
     CollectionContributorResponse,
     CollectionCreateRequest,
     CollectionDocument,
+    CollectionOwnerResponse,
     CollectionPlaceResponse,
     CollectionPublicResponse,
     CollectionResponse,
@@ -357,9 +358,17 @@ class CollectionService:
         self, collection_data: CollectionDocument
     ) -> ResponseSchema[CollectionResponse]:
         """Xây dựng response cho collection."""
+        owner_doc = await user_repo.get_user(collection_data.owner_uid)
+
+        owner_response = CollectionOwnerResponse(
+            uid=owner_doc.uid,
+            username=owner_doc.username,
+            display_name=owner_doc.display_name,
+            avatar_url=owner_doc.avatar_url,
+        )
         collection = CollectionPublicResponse(
             id=collection_data.id,
-            owner_uid=collection_data.owner_uid,
+            owner=owner_response,
             name=collection_data.name,
             description=collection_data.description,
             thumbnail_url=collection_data.thumbnail_url,

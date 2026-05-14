@@ -459,6 +459,7 @@ class CollectionRepository(BaseRepository):
             {
                 "updated_at": timestamp,
                 "contributor_count": fs.Increment(len(contributor_uids)),
+                "contributor_uids": fs.ArrayUnion(contributor_uids),
             },
         )
 
@@ -533,6 +534,7 @@ class CollectionRepository(BaseRepository):
             {
                 "updated_at": self._current_timestamp,
                 "contributor_count": fs.Increment(-len(contributor_uids)),
+                "contributor_uids": fs.ArrayRemove(contributor_uids),
             },
         )
 
