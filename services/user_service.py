@@ -79,12 +79,11 @@ class UserService:
         })
 
     async def get_travel_preference(self, uid: str) -> ResponseSchema[UserTravelPreferenceResponse]:
-        """Lấy travel preference của user."""
-        preference_dict = await self.user_repo.get_travel_preference(uid)
-        if not preference_dict:
+        """Lấy travel_profile của user."""
+        preference_data = await self.user_repo.get_travel_preference(uid)
+        if not preference_data:
             raise NotFoundError("Travel profile not found")
-        
-        preference_data = UserTravelPreference(**preference_dict)
+
         return ResponseSchema(
             status_code=200,
             message="Travel preference retrieved successfully",
@@ -96,33 +95,32 @@ class UserService:
         uid: str,
         preference: UserTravelPreferenceUpdateRequest,
     ) -> ResponseSchema[UserTravelPreferenceResponse]:
-        """Tạo mới/cập nhật travel preference cho user."""
-        # Chuyển đổi thành dict, loại bỏ các trường None (exclude_unset=True)
-        preference_data = preference.model_dump(exclude_unset=True)
+        """Tạo mới/cập nhật travel_profile cho user."""
+        update_data = preference.model_dump(exclude_unset=True)
         
-        # Nếu có preference cũ, merge với cái mới
-        existing_preference_dict = await self.user_repo.get_travel_preference(uid) or {}
-        if existing_preference_dict:
-            existing_preference_dict.update(preference_data)
-            preference_data = existing_preference_dict
+        # Lấy Document hiện tại
+        existing_preference = await self.user_repo.get_travel_preference(uid)
+        if existing_preference:
+            # tạo bản sao và ghi đè các trường trong update_data
+            preference_model = existing_preference.model_copy(update=update_data)
+        else:
+            preference_model = UserTravelPreference(**update_data)
         
         # Ghi vào database
-        updated_data = await self.user_repo.update_travel_preference(uid, preference_data)
-        
-        # Tạo response
-        preference_model = UserTravelPreference(**updated_data)
+        updated_preference = await self.user_repo.update_travel_preference(uid, preference_model)
+
         return ResponseSchema(
             status_code=200,
             message="Travel preference updated successfully",
-            data=UserTravelPreferenceResponse(preference=preference_model)
+            data=UserTravelPreferenceResponse(preference=updated_preference)
         )
 
     async def delete_travel_preference(self, uid: str) -> ResponseSchema[bool]:
-        """Xóa travel preference của user."""
+        """Xóa travel_profile của user."""
         deleted = await self.user_repo.delete_travel_preference(uid)
         if not deleted:
             raise NotFoundError("User not found or preference could not be deleted")
-        
+
         return ResponseSchema(
             status_code=200,
             message="Travel preference deleted successfully",

@@ -1,7 +1,8 @@
-from google.cloud import firestore
 import asyncio
 from repositories.base_repo import BaseRepository
 from google.cloud.firestore_v1.base_query import FieldFilter
+from schemas.user_preference_schema import UserTravelPreference
+
 class UserRepository(BaseRepository):
     def __init__(self):
         super().__init__("users")
@@ -46,22 +47,29 @@ class UserRepository(BaseRepository):
         # NOTE: Để service xử lý exceptions
         await self._update(uid, update_data)
     
-    async def get_travel_preference(self, uid: str) -> dict | None:
+    async def get_travel_preference(self, uid: str) -> UserTravelPreference | None:
         """Lấy travel_profile field từ document user."""
         user_dict = await self._get_by_id(uid)
         if not user_dict:
             return None
-        return user_dict.get("travel_profile")
+
+        preference_dict = user_dict.get("travel_profile")
+        if preference_dict is None:
+            return None
+
+        return UserTravelPreference.model_validate(preference_dict)
     
-    async def update_travel_preference(self, uid: str, preference: dict) -> dict:
+    async def update_travel_preference(self, uid: str, preference: UserTravelPreference) -> UserTravelPreference:
         """Ghi hoặc cập nhật travel_profile cho user."""
-        await self._update(uid, {"travel_profile": preference})
+        await self._update(uid, {"travel_profile": preference.model_dump()})
         return preference
     
     async def delete_travel_preference(self, uid: str) -> bool:
         """Xóa travel_profile của user."""
-        # Nên xóa field luôn hay để None đây sếp :<
-        # await self._update(uid, {"travel_profile": firestore.DELETE_FIELD})
+        user_dict = await self._get_by_id(uid)
+        if not user_dict:
+            return False
+
         await self._update(uid, {"travel_profile": None})
         return True
 
