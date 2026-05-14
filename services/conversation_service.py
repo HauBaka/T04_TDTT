@@ -1,15 +1,15 @@
 import asyncio
+from datetime import datetime, timedelta
 from fastapi import BackgroundTasks
 
+from repositories import invitation_repo
 from repositories.user_repo import user_repo
 from repositories.conversation_repo import conversation_repo
 from schemas.conversation_schema import ConversationDocument, ConversationMemberResponse, ConversationMessageDocument, ConversationMessageResponse, ConversationResponse, ConversationCreateRequest, ConversationUpdateRequest, AddMembersRequest, SendMessageRequest, ConversationRole, ConversationMemberDocument, UserConversationSummaryUpdate
+from schemas.invitation_schema import InvitationDocument, InvitationStatus, InvitationType
+from schemas.notification_schema import NotificationDocument, NotificationType
 from schemas.response_schema import ResponseSchema
 from core.exceptions import AppException, BadRequestError, NotFoundError, PermissionDeniedError
-from schemas.notification_schema import NotificationType
-from services.notification_service import notification_service
-from schemas.invitation_schema import InvitationType, InvitationStatus
-from services.invitation_service import invitation_service
 
 class ConversationService:
     def __init__(self):
@@ -100,46 +100,53 @@ class ConversationService:
             raise BadRequestError(message="All provided UIDs are already members of the conversation")
 
         # Gọi Repo cập nhật mảng member_uids + thêm vào sub-collection members
-        updated_conv = await self.conversation_repository.add_members(conversation_id, new_uids, [ConversationRole.MEMBER] * len(new_uids))
+        # updated_conv = await self.conversation_repository.add_members(conversation_id, new_uids, [ConversationRole.MEMBER] * len(new_uids))
         
         # Tạo tóm tắt hội thoại cho những thành viên mới này
-        summary = UserConversationSummaryUpdate(
-            name=updated_conv.name,
-            description=updated_conv.description,
-            thumbnail_url=updated_conv.thumbnail_url,
-            unread_count=0,
-            latest_msg=None
-        )
-        for uid in new_uids: # chạy ngầm task này
-            invitation_data = {
-                "sender_uid": requester_uid,
-                "target_uid": uid,
-                "type": InvitationType.CONVERSATION.value,
-                "ref_id": conversation_id,
-                "status": InvitationStatus.PENDING.value,
-                "created_at": timestamp
-            }
-            invitation_ref = self.conversation_repository._get_db().collection("invitations").document()
-            batch.set(invitation_ref, invitation_data)
-
-            notification_data = {
-                "receiver_id": uid,
-                "send_at": timestamp,
-                "type": NotificationType.INVITATION.value,
-                "content": f"You have been invited to join the conversation '{conv.get('name')}' by user {requester_uid}.",
-                "read": False,
-                "ref_id": invitation_ref.id,
-                "actor_id": requester_uid
-            }
-            notification_ref = self.conversation_repository._get_db().collection("notifications").document()
-            batch.set(notification_ref, notification_data)
-
-            # background_tasks.add_task(
-            #     self.conversation_repository.upsert_user_conversation_summary, 
-            #     uid, conversation_id, summary
-            # )
+        # summary = UserConversationSummaryUpdate(
+        #     name=updated_conv.name,
+        #     description=updated_conv.description,
+        #     thumbnail_url=updated_conv.thumbnail_url,
+        #     unread_count=0,
+        #     latest_msg=None
+        # )
+        # for uid in new_uids: # chạy ngầm task này
+        #     background_tasks.add_task(
+        #         self.conversation_repository.upsert_user_conversation_summary, 
+        #         uid, conversation_id, summary
+        #     )
         
+        batch = self.conversation_repository._db.batch()
+        timestamp = datetime.now()
+        for target_uid in new_uids:
+            invitation_ref = invitation_repo._collection.document()
+            invitation = InvitationDocument(
+                id=invitation_ref.id,
+                sender_uid=requester_uid,
+                target_uid=target_uid,
+                type=InvitationType.CONVERSATION,
+                ref_id=conversation_id,
+                status=InvitationStatus.PENDING,
+                created_at=timestamp,
+                updated_at=timestamp,
+                expired_at=timestamp + timedelta(days=7)
+            )
+            notification_ref = invitation_repo._db.collection("notifications").document()
+            notification = NotificationDocument(
+                id=notification_ref.id,
+                receiver_id=target_uid,
+                send_at=timestamp,
+                type=NotificationType.INVITATION,
+                content=f"You have been invited to the conversation '{conv.name}'.",
+                read=False,
+                ref_id=invitation_ref.id,
+                actor_id=requester_uid
+            )
+            batch.create(invitation_ref, invitation.model_dump(mode="python", exclude_none=False))
+            batch.create(notification_ref, notification.model_dump(mode="python", exclude_none=False))
+
         await batch.commit()
+
         return ResponseSchema(data=await self._build_response(conv))
     
     async def get_members_from_conversation(self, conversation_id: str, requester_uid: str) -> ResponseSchema[list[ConversationMemberResponse]]:
@@ -176,26 +183,7 @@ class ConversationService:
             self.conversation_repository.remove_user_conversation_summary(uid, conversation_id)
             for uid in valid_target_uids
         ])
-        #for uid in valid_target_uids:
-        #    await self.conversation_repository.remove_user_conversation_summary(uid, conversation_id)
         
-        batch = self.conversation_repository._get_db().batch()
-        timestamp = datetime.now(timezone.utc)
-
-        for target_uid in valid_target_uids:
-            notification_data = {
-                "receiver_id": target_uid,
-                "send_at": timestamp,
-                "type": NotificationType.CONVERSATION_MESSAGE.value,
-                "content": f"You have been removed from the conversation '{conv.get('name')}' by user {requester_uid}.",
-                "read": False,
-                "ref_id": conversation_id,
-                "actor_id": requester_uid
-            }
-            notification_ref = self.conversation_repository._get_db().collection("notifications").document()
-            batch.set(notification_ref, notification_data)
-        
-        await batch.commit()
         return ResponseSchema(data=await self._build_response(updated_conv))
     
     async def send_message_to_conversation(self, conversation_id: str, requester_uid: str, message_data: SendMessageRequest, background_tasks: BackgroundTasks) -> ResponseSchema[ConversationMessageResponse]:

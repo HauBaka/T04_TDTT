@@ -1,5 +1,7 @@
 from google.cloud import firestore as fs
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from repositories.invitation_repo import invitation_repo
+from repositories.notification_repo import notification_repo
 from repositories.user_repo import user_repo
 from repositories.hotel_repo import hotel_repo
 from schemas.collection_schema import  CollectionContributorResponse, CollectionDocument, CollectionPlaceResponse, CollectionPublicResponse, CollectionResponse, CollectionSaverResponse, CollectionVisibility, CollectionCreateRequest, CollectionUpdateRequest
@@ -8,9 +10,9 @@ from core.exceptions import AppException, BadRequestError, NotFoundError, Permis
 from schemas.response_schema import ResponseSchema
 from schemas.view_schema import ViewResponse
 from services.invitation_service import invitation_service
-from schemas.invitation_schema import InvitationType, InvitationStatus
+from schemas.invitation_schema import InvitationDocument, InvitationStatus, InvitationType
 from services.notification_service import notification_service
-from schemas.notification_schema import NotificationType
+from schemas.notification_schema import NotificationDocument, NotificationType
 
 class CollectionService:
     def __init__(self):
@@ -148,9 +150,40 @@ class CollectionService:
             raise BadRequestError(message="All provided contributors are already added to the collection.")
 
         # Thêm vào collection (lưu vào sub-collection với uid, contributed_count, joined_at)
-        updated_collection = await collection_repo.add_contributors_to_collection(collection_id, new_uids)
+        # updated_collection = await collection_repo.add_contributors_to_collection(collection_id, new_uids)
         
-        return await self.build_response(updated_collection)
+        batch = invitation_repo._db.batch()
+        timestamp = datetime.now(timezone.utc)
+        for target_uid in new_uids:
+            invitation_ref = invitation_repo._collection.document()
+            notification_ref = notification_repo._collection.document()
+            invitation = InvitationDocument(
+                id=invitation_ref.id,
+                sender_uid=requester_id,
+                target_uid=target_uid,
+                type=InvitationType.COLLECTION,
+                status=InvitationStatus.PENDING,
+                ref_id=collection_id,
+                created_at=timestamp,
+                updated_at=timestamp,
+                expired_at=timestamp + timedelta(days=7),  # Ví dụ: lời mời
+            )
+            notification = NotificationDocument(
+                id=notification_ref.id,
+                receiver_id=target_uid,
+                send_at=timestamp,
+                type=NotificationType.INVITATION,
+                content=f"You have been invited to the collection '{collection.name}'.",
+                read=False,
+                ref_id=invitation_ref.id,
+                actor_id=requester_id,
+            )
+            batch.create(invitation_ref, invitation.model_dump(mode="python", exclude_none=False))
+            batch.create(notification_ref, notification.model_dump(mode="python", exclude_none=False))
+
+        await batch.commit()
+
+        return await self.build_response(collection)
 
     async def get_contributors_from_collection(self, collection_id: str, requester_id: str | None) -> ResponseSchema[list[CollectionContributorResponse]]:
         """Lấy danh sách chi tiết cộng tác viên từ một collection."""
@@ -185,6 +218,25 @@ class CollectionService:
         # Xóa khỏi collection
         updated_collection = await collection_repo.remove_contributors_from_collection(collection_id, valid_uids)
         
+        batch = notification_repo._db.batch()
+        timestamp = datetime.now(timezone.utc)
+
+        for target_uid in valid_uids:
+            notification_ref = notification_repo._collection.document()
+            notification = NotificationDocument(
+                id=notification_ref.id,
+                receiver_id=target_uid,
+                send_at=timestamp,
+                type=NotificationType.SYSTEM,
+                content=f"You have been removed from the collection '{collection.name}'.",
+                read=False,
+                ref_id=collection_id,
+                actor_id=requester_id,
+            )
+            batch.create(notification_ref, notification.model_dump(mode="python", exclude_none=False))
+
+        await batch.commit()
+
         return await self.build_response(updated_collection)
     
     async def add_tags_to_collection(self, collection_id: str, requester_id: str, tags: list[str]) -> ResponseSchema[CollectionResponse]:

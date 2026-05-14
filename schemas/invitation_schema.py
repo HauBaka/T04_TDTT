@@ -1,7 +1,7 @@
 from datetime import datetime
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class InvitationType(str, Enum):
@@ -14,6 +14,19 @@ class InvitationStatus(str, Enum):
     ACCEPTED = "accepted"
     DECLINED = "declined"
     EXPIRED = "expired"
+
+class InvitationDocument(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    sender_uid: str
+    target_uid: str
+    type: InvitationType
+    ref_id: str
+    status: InvitationStatus
+    created_at: datetime
+    updated_at: datetime
+    expired_at: datetime
 
 class InvitationCreateRequest(BaseModel):
     target_uid: str = Field(..., description="UID của người nhận lời mời")
