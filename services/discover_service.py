@@ -1,21 +1,20 @@
 from core.exceptions import *
-from schemas.discover_schema import DiscoverRequest, DiscoverHotel, WeatherInfo
-from services.sentiment_service import sentiment_service
-from services.summary_service import summary_service
+from schemas.discover_schema import AddressSuggestion, AddressSuggestionRequest, AddressSuggestionResponse, DiscoverRequest, DiscoverHotel, WeatherInfo
+from schemas.response_schema import ResponseSchema
+from schemas.response_schema import ResponseSchema
 from services.weather_service import weather_service
 from services.hotel_ranking_service import hotel_ranking_service
+from services.discover_background_worker import discover_background_worker
 from mock_data.virtual_review import virtual_review_manager
 from externals.SerpAPI import serp_api
 from externals.VietMapAPI import vietmap_api
 from repositories.hotel_repo import hotel_repo
 from loguru import logger
-import asyncio
 
 class DiscoverService:
     def __init__(self, payload: DiscoverRequest, requester_uid: str | None = None):
         self.payload = payload
         self.requester_uid = requester_uid
-        self.sentiment_service = sentiment_service
 
     async def raw_search(self) -> list[DiscoverHotel]:
         """Gọi SerpAPI để lấy dữ liệu thô dựa trên payload đầu vào"""
@@ -97,13 +96,28 @@ class DiscoverService:
 
         raw_results = await hotel_ranking_service.rank_discovered_hotels(raw_results, self.payload, weather_by_identity=weather_by_identity, requester_uid=self.requester_uid)
         
-        # Chạy ngầm
-        async def background_tasks(hotels):
-            await self.sentiment_service.process_places_real_rating(hotels)
-            await summary_service.process_places_ai_summary(hotels, weather_by_identity=weather_by_identity)
-            await hotel_repo.sync_hotels_background(hotels)
-            
-        asyncio.create_task(
-            background_tasks(raw_results) 
-        )
+        discover_background_worker.enqueue(raw_results, weather_by_identity)
         return raw_results
+    
+    @staticmethod
+    async def suggest_addresses(query: AddressSuggestionRequest) -> ResponseSchema[AddressSuggestionResponse]:
+        """Gợi ý địa chỉ dựa trên query đầu vào"""
+        try:
+            autocomplete_result = await vietmap_api.autocomplete(query.query, query.gps)
+            if not autocomplete_result or not autocomplete_result.data:
+                return ResponseSchema[AddressSuggestionResponse](data=AddressSuggestionResponse(suggestions=[]))
+            
+            suggestions = []
+            for item in autocomplete_result.data:
+                suggestion = AddressSuggestion(
+                    address=item.address,
+                    name=item.name,
+                    display=item.display,
+                    distance=item.distance,
+                    ref_id=item.ref_id
+                )
+                suggestions.append(suggestion)
+            return ResponseSchema[AddressSuggestionResponse](data=AddressSuggestionResponse(suggestions=suggestions))
+        except Exception as exc:
+            logger.error(f"Error in suggest_addresses: {str(exc)}")
+            raise AppException("Failed to get address suggestions", status_code=500)

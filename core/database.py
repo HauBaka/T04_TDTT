@@ -7,12 +7,13 @@ class FirebaseManager:
     def __init__(self):
         self._db = None
 
-    def initialize(self):
+    async def initialize(self):
         if not firebase_admin._apps:
-            if not os.path.exists(settings.FIREBASE_CREDENTIAL):
-                raise FileNotFoundError(f"File not found: {settings.FIREBASE_CREDENTIAL}.")
-                
-            cred = credentials.Certificate(settings.FIREBASE_CREDENTIAL)
+            firebase_credential_path = settings.FIREBASE_CREDENTIAL.get_secret_value()
+            if not os.path.exists(firebase_credential_path):
+                raise FileNotFoundError(f"File not found: {firebase_credential_path}.")
+
+            cred = credentials.Certificate(firebase_credential_path)
             firebase_admin.initialize_app(cred)
             
         self._db = firestore_async.client()
