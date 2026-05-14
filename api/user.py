@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, BackgroundTasks
 from fastapi import Depends
 from core.dependencies import get_current_user
 from schemas.collection_schema import CollectionPrivateResponse, CollectionPublicResponse
@@ -51,14 +51,14 @@ async def get_saved_collections(current_user=Depends(get_current_user(optional=F
     return await user_service.get_saved_collections(requester_uid=current_user['uid'])
 
 @user_router.post("/me/saved-collections", response_model=ResponseSchema[bool])
-async def save_collection(collection: UserSaveCollectionRequest, current_user=Depends(get_current_user(optional=False))):
+async def save_collection(collection: UserSaveCollectionRequest, background_tasks: BackgroundTasks, current_user=Depends(get_current_user(optional=False))):
     """Lưu một collection vào danh sách đã lưu của người dùng."""
-    return await user_service.save_collection(requester_uid=current_user['uid'], collection=collection)
+    return await user_service.save_collection(requester_uid=current_user['uid'], collection=collection, background_tasks=background_tasks)
 
 @user_router.delete("/me/saved-collections/{collection_id}", response_model=ResponseSchema[bool])
-async def unsave_collection(collection_id: str, current_user=Depends(get_current_user(optional=False))):
+async def unsave_collection(collection_id: str, background_tasks: BackgroundTasks, current_user=Depends(get_current_user(optional=False))):
     """Xóa một collection khỏi danh sách đã lưu của người dùng."""
-    return await user_service.unsave_collection(requester_uid=current_user['uid'], collection_id=collection_id)
+    return await user_service.unsave_collection(requester_uid=current_user['uid'], collection_id=collection_id, background_tasks=background_tasks)
 
 # --- conversations
 @user_router.get("/me/conversations", response_model=ResponseSchema[list[ConversationResponse]])
