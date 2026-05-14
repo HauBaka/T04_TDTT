@@ -24,6 +24,9 @@ from api.view import view_router
 from core.database import firebase_manager
 from core.exceptions import AppException
 from core.limiter import AutoRateLimitMiddleware, limiter
+from externals.PhoBERT import PhoBERT
+from externals.SemanticModel import semantic_model_client
+from mock_data.virtual_review import virtual_review_manager
 
 
 # Khởi tạo các thành phần cần thiết
@@ -32,15 +35,15 @@ async def lifespan(app: FastAPI):
     # Khởi tạo Firebase
     await firebase_manager.initialize()
     # # Khởi tạo Virtual Review
-    # try:
-    #     virtual_review_manager.initialize("mock_data/user_reviews.csv")
-    # except FileNotFoundError as e:
-    #     logger.error(f"Error initializing virtual review manager: {e}")
+    try:
+        virtual_review_manager.initialize("mock_data/user_reviews.csv")
+    except FileNotFoundError as e:
+        logger.error(f"Error initializing virtual review manager: {e}")
 
-    # # Khởi tạo PhoBERT
-    # PhoBERT.load_model()
-    # # Khởi tạo Semantic Model
-    # semantic_model_client.load_model()
+    # Khởi tạo PhoBERT
+    PhoBERT.load_model()
+    # Khởi tạo Semantic Model
+    semantic_model_client.load_model()
     # Khởi tạo HTTP client
     http_client._http_client = httpx.AsyncClient(timeout=10.0)
     yield

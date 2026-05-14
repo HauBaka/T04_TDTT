@@ -1,8 +1,6 @@
-import asyncio
-
 from loguru import logger
 
-from core.exceptions import *
+from core.exceptions import AppException, NotFoundError
 from externals.SerpAPI import serp_api
 from externals.VietMapAPI import vietmap_api
 from mock_data.virtual_review import virtual_review_manager
@@ -13,11 +11,14 @@ from schemas.discover_schema import (
     AddressSuggestionResponse,
     DiscoverHotel,
     DiscoverRequest,
+    DiscoverResponse,
 )
-from schemas.response_schema import ResponseSchema
+from schemas.response_schema import GPSCoordinates, ResponseSchema
 
 # from services.hotel_ranking_service import hotel_ranking_service
+from schemas.vietmap_schema import AutoCompleteResult
 from services.sentiment_service import sentiment_service
+from utils.haversine_distance import haversine_distance
 
 # from services.weather_service import weather_service
 
@@ -27,6 +28,7 @@ class DiscoverService:
         self.payload = payload
         self.requester_uid = requester_uid
         self.sentiment_service = sentiment_service
+        self.searching_place: AutoCompleteResult | None = None
 
     async def raw_search(self) -> list[DiscoverHotel]:
         """Gọi SerpAPI để lấy dữ liệu thô dựa trên payload đầu vào"""
@@ -49,7 +51,7 @@ class DiscoverService:
             virtual_review_manager.add_random_reviews(hotel, min_count=3, max_count=5)
         # XXX: hơi chậm
 
-    async def execute_discover_pipeline(self) -> list[DiscoverHotel]:
+    async def execute_discover_pipeline(self) -> DiscoverResponse:
         """Thực thi pipeline tìm kiếm"""
         gps_coordinates = None
         if self.payload.ref_id:
@@ -69,6 +71,7 @@ class DiscoverService:
             if autocomplete_result and autocomplete_result.data:
                 # Ko có gps ng dùng thì lấy cái đầu
                 self.payload.address = autocomplete_result.data[0].display
+                self.searching_place = autocomplete_result.data[0]
 
                 place_detail = await vietmap_api.get_place_details(
                     autocomplete_result.data[0].ref_id
@@ -136,8 +139,17 @@ class DiscoverService:
         # )
         # await summary_service.process_places_ai_summary(raw_results, weather_by_identity=weather_by_identity) XXX: quá nghèo để có thể gọi AI Summary, tạm thời để sau
         # Chạy ngầm
-        asyncio.create_task(hotel_repo.sync_hotels_background(raw_results))
-        return raw_results
+
+        # await asyncio.gather(
+        #     # hotel_repo.sync_hotels_background(raw_results),
+        #     self._detail_searching_place(),
+        #     self._calculate_distance_for_results(raw_results),
+        # )
+
+        await self._detail_searching_place()
+        await self._calculate_distance_for_results(raw_results)
+
+        return DiscoverResponse(searching_place=self.searching_place, data=raw_results)
 
     @staticmethod
     async def suggest_addresses(
@@ -167,3 +179,62 @@ class DiscoverService:
         except Exception as exc:
             logger.error(f"Error in suggest_addresses: {str(exc)}")
             raise AppException("Failed to get address suggestions", status_code=500)
+
+    @staticmethod
+    async def get_hotel_details(
+        hotel_id: str, gps: GPSCoordinates | None = None
+    ) -> ResponseSchema[DiscoverHotel]:
+        """Lấy chi tiết khách sạn dựa trên hotel_id (property_token)"""
+        hotel_doc = await hotel_repo.get_hotels([hotel_id])
+        hotel = hotel_doc.get(hotel_id) if hotel_doc else None
+        if not hotel:
+            raise NotFoundError("Hotel not found")
+
+        hotel_detail = DiscoverHotel.from_hotel_document(hotel)
+        if gps and hotel_detail.gps_coordinates:
+            hotel_detail.distance = haversine_distance(
+                gps, hotel_detail.gps_coordinates
+            )
+
+        return ResponseSchema(data=hotel_detail)
+
+    async def _detail_searching_place(self):
+        if self.searching_place and self.searching_place.ref_id:
+            try:
+                place_detail = await vietmap_api.get_place_details(
+                    self.searching_place.ref_id
+                )
+
+                if place_detail and place_detail.result:
+                    self.searching_place = AutoCompleteResult(
+                        name=place_detail.result.name,
+                        address=place_detail.result.address,
+                        display=place_detail.result.display,
+                        ref_id=self.searching_place.ref_id,
+                        distance=self.searching_place.distance,
+                        gps=place_detail.result.gps_coordinates,
+                    )
+
+            except Exception as exc:
+                logger.error(
+                    f"Error in detail_searching_place "
+                    f"for ref_id {self.searching_place.ref_id}: {exc}"
+                )
+
+    async def _calculate_distance_for_results(self, hotels: list[DiscoverHotel]):
+        """Tính khoảng cách từ searching_place đến từng hotel
+
+        Thuật toán sử dụng: Haversine để tính khoảng cách địa lý giữa 2 điểm GPS. Kết quả sẽ được lưu vào trường `distance` của từng hotel.
+        """
+        if not self.searching_place or not self.searching_place.gps:
+            return
+
+        for hotel in hotels:
+            if hotel.gps_coordinates:
+                hotel.distance = haversine_distance(
+                    GPSCoordinates(
+                        latitude=self.searching_place.gps.latitude,
+                        longitude=self.searching_place.gps.longitude,
+                    ),
+                    hotel.gps_coordinates,
+                )

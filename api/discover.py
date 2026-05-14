@@ -4,9 +4,10 @@ from core.exceptions import AppException
 from schemas.discover_schema import (
     AddressSuggestionRequest,
     AddressSuggestionResponse,
+    DiscoverHotel,
     DiscoverRequest,
 )
-from schemas.response_schema import ResponseSchema
+from schemas.response_schema import GPSCoordinates, ResponseSchema
 from services.discover_service import DiscoverService
 
 discover_router = APIRouter()
@@ -30,3 +31,18 @@ async def perform(payload: DiscoverRequest):
 async def suggest_address(query: AddressSuggestionRequest):
     """Đề xuất địa chỉ dựa trên truy vấn đầu vào."""
     return await DiscoverService.suggest_addresses(query)
+
+
+@discover_router.get(
+    "/discover/hotels/{hotel_id}", response_model=ResponseSchema[DiscoverHotel]
+)
+async def get_hotel_details(
+    hotel_id: str, latitude: float | None = None, longitude: float | None = None
+):
+    """Lấy chi tiết khách sạn dựa trên hotel_id (property_token)"""
+    gps = (
+        GPSCoordinates(latitude=latitude, longitude=longitude)
+        if latitude is not None and longitude is not None
+        else None
+    )
+    return await DiscoverService.get_hotel_details(hotel_id=hotel_id, gps=gps)

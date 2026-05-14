@@ -5,7 +5,9 @@ from typing import Annotated, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from schemas.response_schema import GPSCoordinates
 from schemas.trip_context_schema import TravelStyle, TripSearchCriteria
+from schemas.vietmap_schema import AutoCompleteResult
 from schemas.view_schema import ViewResponse
 
 
@@ -71,6 +73,11 @@ class DiscoverRequest(BaseModel):
         return self
 
 
+class GetHotelDetailsRequest(BaseModel):
+    hotel_id: str  # property_token của khách sạn cần lấy chi tiết
+    gps: GPSCoordinates | None = None
+
+
 # ==============================
 # CÁC CLASS AI & REVIEWS
 # ==============================
@@ -120,12 +127,6 @@ class WeatherInfo(BaseModel):
     rain_chance: int  # Xác suất có mưa
 
 
-class GPSCoordinates(BaseModel):
-    latitude: float
-    longitude: float
-    geohash: str | None = None
-
-
 class HotelImage(BaseModel):
     thumbnail: str | None = None
     original_image: str | None = None
@@ -169,7 +170,7 @@ class DiscoverHotel(BaseModel):
     phone: str | None = None
     gps_coordinates: GPSCoordinates | None = None
     nearby_places: list[NearbyPlace] = []  # Danh sách các địa điểm lân cận
-
+    distance: float | None = None  # Khoảng cách từ searching_place đến khách sạn
     # Nhận phòng & Trả phòng
     check_in_time: str | None = None
     check_out_time: str | None = None
@@ -204,6 +205,7 @@ class DiscoverHotel(BaseModel):
 
 
 class DiscoverResponse(BaseModel):
+    searching_place: Optional[AutoCompleteResult]  # Địa điểm dùng để kiếm places
     data: list[
         DiscoverHotel
     ]  # Danh sách các khách sạn phù hợp, mỗi khách sạn là một dict với thông tin chi tiết
