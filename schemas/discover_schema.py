@@ -1,43 +1,54 @@
 from __future__ import annotations
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+
 from datetime import datetime, timezone
 from typing import Annotated, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from schemas.response_schema import GPSCoordinates
 from schemas.trip_context_schema import TravelStyle, TripSearchCriteria
+from schemas.vietmap_schema import AutoCompleteResult
 from schemas.view_schema import ViewResponse
+
+
 # ==============================
 # CÁC CLASS REQUEST & VALIDATION
 # ==============================
 class DiscoverRequest(BaseModel):
-    language: str # để tạm
+    language: str  # để tạm
     address: str
     gps: GPSCoordinates | None = None
-    ref_id: str | None = None # ref_id của VietMap nếu có, để ưu tiên tìm kiếm chính xác hơn
-    
+    ref_id: str | None = (
+        None  # ref_id của VietMap nếu có, để ưu tiên tìm kiếm chính xác hơn
+    )
+
     check_in: datetime
     check_out: datetime
     min_price: int
     max_price: int
-    children: list[Annotated[int, Field(ge=1, le=17)]] | None = None  # Tuổi của trẻ em, ví dụ: [5, 8] nếu có 2 trẻ em 5 và 8 tuổi
+    children: list[Annotated[int, Field(ge=1, le=17)]] | None = (
+        None  # Tuổi của trẻ em, ví dụ: [5, 8] nếu có 2 trẻ em 5 và 8 tuổi
+    )
     adults: int
-    personality: str # để tạm
+    personality: str  # để tạm
     trip_style: TravelStyle = TravelStyle.EXPLORE
-    
+
     trip_criteria: TripSearchCriteria | None = None
     max_ranked_hotels: Annotated[int, Field(ge=1, le=200)] | None = None
-    
+
     # Thêm ràng buộc
-    @model_validator(mode='after')
-    def validate_cross_fields(self) -> 'DiscoverRequest':
+    @model_validator(mode="after")
+    def validate_cross_fields(self) -> "DiscoverRequest":
         # Đổi timezone của check_in và check_out về UTC để so sánh chính xác hơn
         self.check_in = self.check_in.astimezone(timezone.utc)
         self.check_out = self.check_out.astimezone(timezone.utc)
         # 1. Ràng buộc ngày tháng: today <= check_in < check_out
         if self.check_in < datetime.now(timezone.utc):
             raise ValueError("check_in must be today or later.")
-        
+
         if self.check_in >= self.check_out:
             raise ValueError("check_in must be before check_out.")
-            
+
         # 2. Ràng buộc giá: min_price < max_price
         if self.min_price >= self.max_price:
             raise ValueError("min_price must be less than max_price.")
@@ -58,30 +69,42 @@ class DiscoverRequest(BaseModel):
             self.trip_criteria.budget_max = self.max_price
             self.trip_criteria.trip_style = self.trip_style
             self.trip_criteria.party_size = party_size
-            
+
         return self
+
+
+class GetHotelDetailsRequest(BaseModel):
+    hotel_id: str  # property_token của khách sạn cần lấy chi tiết
+    gps: GPSCoordinates | None = None
+
 
 # ==============================
 # CÁC CLASS AI & REVIEWS
 # ==============================
+
 
 # Review gốc từ người dùng
 class UserReview(BaseModel):
     text: str
     raw_stars: float
 
+
 # Review sau khi phân tích cảm xúc
 class AnalyzedReview(UserReview):
-    sentiment_score: float    # Điểm do PhoBERT chấm
-    trust_weight: float       # Trọng số tin cậy của review (0.0 -> 1.0)
-    adjusted_stars: float     # Điểm sau khi đối soát (kết hợp raw_stars và sentiment_score)
+    sentiment_score: float  # Điểm do PhoBERT chấm
+    trust_weight: float  # Trọng số tin cậy của review (0.0 -> 1.0)
+    adjusted_stars: (
+        float  # Điểm sau khi đối soát (kết hợp raw_stars và sentiment_score)
+    )
+
 
 class AISentimentResult(BaseModel):
     ai_score: float | None = None
     ai_score_expiration_date: datetime | None = None
     trust_weight: float = 0.0
     analyzed_reviews: list[AnalyzedReview] = []
-    
+
+
 # Tóm tắt AI cho review
 class AIReviewSummary(BaseModel):
     ai_summary_expiration_date: datetime | None = None
@@ -90,37 +113,40 @@ class AIReviewSummary(BaseModel):
     cons: list[str] | None = None
     notes: str | None = None
 
+
 # ==========================================
 # CÁC CLASS DATA KHÁC
 # ==========================================
 
+
 class WeatherInfo(BaseModel):
     """Schema lưu trữ thông tin thời tiết tại điểm đến"""
-    
-    condition: str # trạng thái thời tiết (VD: Trời nắng, Mưa to, Nhiều mây)
-    temp_c: float # nhiệt độ thực tế
-    rain_chance: int # Xác suất có mưa
 
-class GPSCoordinates(BaseModel):
-    latitude: float
-    longitude: float
-    geohash: str | None = None
+    condition: str  # trạng thái thời tiết (VD: Trời nắng, Mưa to, Nhiều mây)
+    temp_c: float  # nhiệt độ thực tế
+    rain_chance: int  # Xác suất có mưa
+
+
 class HotelImage(BaseModel):
     thumbnail: str | None = None
     original_image: str | None = None
 
+
 class BookingSource(BaseModel):
     """Giá khi book tại các trang khác (Agoda, Booking,...)"""
+
     source: str
     logo: str | None = None
     link: str | None = None
-    price: int | None = None # Lấy từ rate_per_night.extracted_lowest
+    price: int | None = None  # Lấy từ rate_per_night.extracted_lowest
+
 
 # Phương tiện di chuyển đến địa điểm lân cận
 class Transportation(BaseModel):
     type: str | None = None
     distance: str | None = None
     duration: str | None = None
+
 
 # Địa điểm lân cận
 class NearbyPlace(BaseModel):
@@ -129,7 +155,10 @@ class NearbyPlace(BaseModel):
     thumbnail: str | None = None
     description: str | None = None
     gps_coordinates: GPSCoordinates | None = None
-    transportations: list[Transportation] = [] # Danh sách các phương tiện di chuyển đến địa điểm này
+    transportations: list[
+        Transportation
+    ] = []  # Danh sách các phương tiện di chuyển đến địa điểm này
+
 
 class DiscoverHotel(BaseModel):
     # thông itn cơ bản
@@ -140,27 +169,29 @@ class DiscoverHotel(BaseModel):
     address: str | None = None
     phone: str | None = None
     gps_coordinates: GPSCoordinates | None = None
-    nearby_places: list[NearbyPlace] = [] # Danh sách các địa điểm lân cận
-
+    nearby_places: list[NearbyPlace] = []  # Danh sách các địa điểm lân cận
+    distance: float | None = None  # Khoảng cách từ searching_place đến khách sạn
     # Nhận phòng & Trả phòng
     check_in_time: str | None = None
     check_out_time: str | None = None
 
-    price: float # json_data -> rate_per_night.extracted_lowest
+    price: float  # json_data -> rate_per_night.extracted_lowest
     deal: str | None = None
-    booking_sources: list[BookingSource] = [] # Danh sách giá ở các trang khác
+    booking_sources: list[BookingSource] = []  # Danh sách giá ở các trang khác
 
     # ảnh & Tiện ích
-    images: list[HotelImage] = [] 
+    images: list[HotelImage] = []
     amenities: list[str] = []
 
     # Reviews gốc
-    raw_rating: float = 0.0 # trung bình từ các user reviews
-    user_reviews: list[UserReview] = [] # Danh sách review gốc (chưa phân tích)
+    raw_rating: float = 0.0  # trung bình từ các user reviews
+    user_reviews: list[UserReview] = []  # Danh sách review gốc (chưa phân tích)
 
     # Ai phân tích lại
     ai_sentiment: AISentimentResult | None = None
-    ai_summary: AIReviewSummary | None = None     # Tóm tắt do AI tạo ra, có thể hết hạn và cần được làm mới
+    ai_summary: AIReviewSummary | None = (
+        None  # Tóm tắt do AI tạo ra, có thể hết hạn và cần được làm mới
+    )
 
     # updates
     last_updated: datetime | None = None
@@ -168,11 +199,21 @@ class DiscoverHotel(BaseModel):
     # views
     views: ViewResponse = Field(default_factory=ViewResponse)
 
+    @classmethod
+    def from_hotel_document(cls, hotel_doc: HotelDocument) -> DiscoverHotel:
+        return cls.model_validate(hotel_doc.model_dump())
+
+
 class DiscoverResponse(BaseModel):
-    data: list[DiscoverHotel] # Danh sách các khách sạn phù hợp, mỗi khách sạn là một dict với thông tin chi tiết
+    searching_place: Optional[AutoCompleteResult]  # Địa điểm dùng để kiếm places
+    data: list[
+        DiscoverHotel
+    ]  # Danh sách các khách sạn phù hợp, mỗi khách sạn là một dict với thông tin chi tiết
+
 
 class HotelDocument(BaseModel):
     """hotels/{property_token}"""
+
     model_config = ConfigDict(from_attributes=True)
 
     property_token: str
@@ -191,7 +232,7 @@ class HotelDocument(BaseModel):
     deal: str | None = None
     booking_sources: list[BookingSource] = []
 
-    images: list[HotelImage] = [] 
+    images: list[HotelImage] = []
     amenities: list[str] = []
 
     raw_rating: float = 0.0
@@ -202,12 +243,14 @@ class HotelDocument(BaseModel):
 
     added_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     last_updated: datetime | None = None
-    
+
     views: ViewResponse = Field(default_factory=ViewResponse)
+
 
 class AddressSuggestionRequest(BaseModel):
     query: str
     gps: Optional[GPSCoordinates] = None
+
 
 class AddressSuggestion(BaseModel):
     address: Optional[str] = None
@@ -215,5 +258,7 @@ class AddressSuggestion(BaseModel):
     display: Optional[str] = None
     distance: Optional[float] = -1.0
     ref_id: str
+
+
 class AddressSuggestionResponse(BaseModel):
     suggestions: list[AddressSuggestion]

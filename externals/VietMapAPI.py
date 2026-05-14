@@ -1,10 +1,16 @@
+import httpx
+import pygeohash as pgh
 from loguru import logger
 
 from core.settings import settings
-import httpx
 from schemas.discover_schema import GPSCoordinates
-from schemas.vietmap_schema import AutoCompleteResult, VietMapAutocompleteRequest, VietMapAutocompleteResponse, VietMapPlaceDetailRequest, VietMapPlaceDetailResponse, VietMapPlaceResult
-import pygeohash as pgh
+from schemas.vietmap_schema import (
+    AutoCompleteResult,
+    VietMapAutocompleteResponse,
+    VietMapPlaceDetailResponse,
+    VietMapPlaceResult,
+)
+
 
 class VietMapAPI:
     def __init__(self):
@@ -18,45 +24,55 @@ class VietMapAPI:
 
     async def get_place_details(self, ref_id: str) -> VietMapPlaceDetailResponse:
         """Lấy chi tiết địa điểm dựa trên ref_id."""
-        params = {
-            "refid": ref_id,
-            "apikey": self.api_key
-        }
+        params = {"refid": ref_id, "apikey": self.api_key}
         async with httpx.AsyncClient() as client:
-            response = await client.get(self.search_url.format(type="place"), params=params)
+            response = await client.get(
+                self.search_url.format(type="place"), params=params
+            )
             if response.status_code == 200:
                 data = response.json()
-                
                 return VietMapPlaceDetailResponse(
                     result=VietMapPlaceResult(
                         name=data.get("name", ""),
+                        address=data.get("address", ""),
+                        display=data.get("display", ""),
                         gps_coordinates=GPSCoordinates(
                             latitude=data.get("lat", 0.0),
                             longitude=data.get("lng", 0.0),
-                            geohash=pgh.encode(data.get("lat", 0.0), data.get("lng", 0.0), settings.GEOHASH_PRECISION)
-                        )
+                            geohash=pgh.encode(
+                                data.get("lat", 0.0),
+                                data.get("lng", 0.0),
+                                settings.GEOHASH_PRECISION,
+                            ),
+                        ),
                     )
                 )
-            
-            logger.warning(f"Failed to get place details from VietMap for ref_id {ref_id}: HTTP {response.status_code} - {response.text}")
+
+            logger.warning(
+                f"Failed to get place details from VietMap for ref_id {ref_id}: HTTP {response.status_code} - {response.text}"
+            )
 
         return VietMapPlaceDetailResponse(result=None)
 
-    async def autocomplete(self, text: str, gps: GPSCoordinates | None = None) -> VietMapAutocompleteResponse:
+    async def autocomplete(
+        self, text: str, gps: GPSCoordinates | None = None
+    ) -> VietMapAutocompleteResponse:
         """Tìm kiếm thông tin địa điểm (đa dạng hơn hotel) dựa trên query."""
         params = {
             "text": text,
             "display_type": self.display_type,
-            "apikey": self.api_key
+            "apikey": self.api_key,
         }
         if gps:
             params["focus"] = f"{gps.latitude},{gps.longitude}"
 
-        headers = {
-            "Accept": "application/json"
-        }
+        headers = {"Accept": "application/json"}
         async with httpx.AsyncClient(headers=headers) as client:
-            response = await client.get(self.search_url.format(type="autocomplete"), params=params, headers=headers)
+            response = await client.get(
+                self.search_url.format(type="autocomplete"),
+                params=params,
+                headers=headers,
+            )
             if response.status_code == 200:
                 data = response.json()
 
@@ -67,12 +83,13 @@ class VietMapAPI:
                         address=item.get("address", ""),
                         display=item.get("display", ""),
                         ref_id=item.get("ref_id", ""),
-                        distance=item.get("distance", -1.0)
+                        distance=item.get("distance", -1.0),
                     )
                     results.append(result)
 
                 return VietMapAutocompleteResponse(data=results)
 
         return VietMapAutocompleteResponse(data=[])
+
 
 vietmap_api = VietMapAPI()
