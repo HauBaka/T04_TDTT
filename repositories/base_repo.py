@@ -5,6 +5,11 @@ from google.cloud.firestore_v1.field_path import FieldPath
 from google.cloud.firestore_v1.base_query import FieldFilter
 from google.cloud.firestore_v1.async_document import AsyncDocumentReference
 from google.cloud.firestore_v1.base_document import DocumentSnapshot
+from google.cloud.exceptions import NotFound
+from core.exceptions import DatabaseError, NotFoundError, ValidationError
+
+from loguru import logger
+
 MAX_IN_QUERY = 30
 class BaseRepository:
     def __init__(self, collection_name: str):
@@ -18,68 +23,84 @@ class BaseRepository:
     def _collection(self):
         return self._db.collection(self.collection_name)
 
-    async def _get_by_id(self, doc_id: str) -> dict | None:
-            """Lấy một document theo ID"""
+    async def _get_by_id(self, doc_id: str) -> dict:
+            """Lấy một document theo ID
+            
+            Raises:
+                NotFoundError: Nếu document không tồn tại hoặc data rỗng
+                ValidationError: Nếu doc_id rỗng
+            """
+            if not doc_id:
+                raise ValidationError("Document ID is required")
+
             doc = await self._collection.document(doc_id).get()
             if not doc.exists:
-                return None
+                raise NotFoundError("Document not found")
                 
             data = doc.to_dict()
-            if data is not None:
-                data["id"] = doc.id
+            if data is None:
+                raise NotFoundError("Document data is empty")
+
+            data["id"] = doc.id
 
             return data
     
     async def _get_by_ids(self, doc_ids: list[str]) -> list[dict]:
-        """Lấy nhiều document theo list ID"""
+        """Lấy nhiều document theo list ID
 
-        if not doc_ids:
+        """
+        clean_ids = [str(did).strip() for did in doc_ids if did and str(did).strip()]
+
+        if not clean_ids:
             return []
 
-        # Chia nhỏ theo giới hạn Firestore IN query
-        chunks = [
-            doc_ids[i:i + MAX_IN_QUERY]
-            for i in range(0, len(doc_ids), MAX_IN_QUERY)
-        ]
-
-        tasks = [
-            self._collection.where(
-                filter=FieldFilter(
-                    FieldPath.document_id(),
-                    "in",
-                    chunk
-                )
-            ).get()
-            for chunk in chunks
-        ]
-
-        query_results = await asyncio.gather(*tasks)
-
-        result = []
-
-        for docs in query_results:
+        try:
+            doc_refs = [self._collection.document(did) for did in clean_ids]
+            docs = [doc async for doc in self._db.get_all(doc_refs)]
+            
+            result = []
             for doc in docs:
-                data = doc.to_dict()
+                if doc.exists:
+                    data = doc.to_dict()
+                    if data is not None:
+                        data["id"] = doc.id
+                        result.append(data)
+        
+            return result
 
-                if data is not None:
-                    data["id"] = doc.id
-                    result.append(data)
-
-        return result
-    
+        except Exception as e:
+            logger.error(f"Error in _get_by_ids using get_all: {str(e)}")
+            return []
+        
     async def _create(self, data: dict, doc_id: str | None = None) -> str:
-        """Tạo document mới. Nếu có doc_id thì dùng, không thì tự generate"""
+        """Tạo document mới. Nếu có doc_id thì dùng, không thì tự generate
+        
+        Raises:
+            ValidationError: Nếu data rỗng
+        """
+        if not data:
+            raise ValidationError("Data for creation cannot be empty")
+        
         if doc_id:
             ref = self._collection.document(doc_id)
         else:
             ref = self._collection.document()
             
+        data["id"] = ref.id
+
         await ref.set(data)
         return ref.id
 
     async def _update(self, doc_id: str, update_data: dict) -> None:
-        """Cập nhật document"""
-        await self._collection.document(doc_id).update(update_data)
+        """Cập nhật document
+
+        Raises:
+            NotFoundError: Nếu document không tồn tại
+        """
+        try:
+            await self._collection.document(doc_id).update(update_data)
+        except NotFound:
+            raise NotFoundError()
 
     async def _delete_subcollection(self, sub_ref) -> None:
         batch = self._db.batch()
@@ -98,16 +119,45 @@ class BaseRepository:
             await batch.commit()
 
     async def _delete(self, doc_id: str) -> bool:
-        """Xóa một document"""
+        """Xóa một document
+        
+        Raises:
+            NotFoundError: Nếu document không tồn tại
+            ValidationError: Nếu doc_id rỗng
+        """
+        if not doc_id:
+            raise ValidationError("Document ID is required")
+
         ref = self._collection.document(doc_id)
         doc = await ref.get()
         
         if not doc.exists:
-            return False
+            raise NotFoundError("Document not found")
 
         await ref.delete()
         return True
     
+    async def _commit_batch(self, batch, retries=2):
+        """ Commit batch với retry mechanism để tăng độ bền khi có lỗi tạm thời
+        
+        Raises:
+            DatabaseError: Nếu commit thất bại sau tất cả retries
+            ValidationError: Nếu batch rỗng
+        """
+        if not batch:
+            raise ValidationError("Batch object is required for commit")
+
+        for attempt in range(retries + 1):
+            try:
+                await batch.commit()
+                return
+            except Exception as e:
+                if attempt < retries:
+                    await asyncio.sleep(0.5 * (2 ** attempt))  # backoff
+                else:
+                    logger.error(f"Failed to commit batch after {retries} retries: {str(e)}")
+                    raise DatabaseError("Failed to commit batch to database")
+
     @property
     def _current_timestamp(self):
         from datetime import datetime, timezone

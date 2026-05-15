@@ -1,7 +1,8 @@
 from enum import Enum
 from typing import Optional
+from datetime import datetime
 
-from pydantic import BaseModel, Field, PositiveInt
+from pydantic import BaseModel, ConfigDict, Field, PositiveInt
 
 class UploadStatus(str, Enum):
     PENDING = "pending"
@@ -29,9 +30,41 @@ class UploadConfirmRequest(BaseModel): # Request body khi client thông báo đ�
     file_size: PositiveInt
     etag: Optional[str] = None
 
+class UploadCreateRequest(BaseModel):
+    user_id: str
+    file_key: str
+    content_type: str
+    file_size: int
+    category: UploadCategory
+    status: UploadStatus
+    created_at: datetime
+    expires_at: datetime
+    public_url: str
+
 
 class UploadConfirmResponse(BaseModel): # Response trả về khi client xác nhận việc upload file thành công
     file_key: str
     public_url: str
     size_bytes: int
     content_type: str
+
+class UploadDocument(BaseModel):
+    """uploads/{upload_id}"""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    user_id: str
+    file_key: str
+    public_url: str | None = None
+    etag: str | None = None
+    category: UploadCategory
+    status: UploadStatus
+
+    content_type: str
+    file_size: int
+    size_bytes: int | None = None
+
+    created_at: datetime | None = None
+    expires_at: datetime | None = None
+    confirmed_at: datetime | None = None
+    
