@@ -33,7 +33,7 @@ class CollectionService:
 
         return await self.build_response(collection)
     
-    async def update_collection(self, collection_id: str, requester_id: str, update_data: CollectionUpdateRequest, background_tasks: BackgroundTasks) -> ResponseSchema[CollectionResponse]:
+    async def update_collection(self, collection_id: str, requester_id: str, update_data: CollectionUpdateRequest) -> ResponseSchema[CollectionResponse]:
         """Cập nhật thông tin của một collection. Chỉ owner mới có thể cập nhật."""
 
         # Check collection có tồn tại không

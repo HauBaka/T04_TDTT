@@ -32,9 +32,9 @@ async def get_collection(collection_id: str, requester=Depends(get_current_user(
     return await collection_service.get_collection(collection_id, requester.get("uid") if requester else None)
 
 @collection_router.patch("/collections/{collection_id}", response_model=ResponseSchema[CollectionResponse])
-async def update_collection(collection_id: str, collection_request: CollectionUpdateRequest, background_tasks: BackgroundTasks, requester=Depends(get_current_user(optional=False))):
+async def update_collection(collection_id: str, collection_request: CollectionUpdateRequest, requester=Depends(get_current_user(optional=False))):
     """Cập nhật thông tin của một collection cụ thể."""
-    return await collection_service.update_collection(collection_id, requester.get("uid"), collection_request, background_tasks=background_tasks)
+    return await collection_service.update_collection(collection_id, requester.get("uid"), collection_request)
 
 @collection_router.delete("/collections/{collection_id}", response_model=ResponseSchema[bool])
 async def delete_collection(collection_id: str, background_tasks: BackgroundTasks, requester=Depends(get_current_user(optional=False))):
