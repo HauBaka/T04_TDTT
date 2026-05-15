@@ -158,6 +158,7 @@ class NearbyPlace(BaseModel):
 
 
 class DiscoverHotel(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     # thông itn cơ bản
     property_token: str | None = None
     name: str
