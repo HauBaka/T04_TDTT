@@ -42,7 +42,7 @@ class BehaviorEventRepo(BaseRepository):
             metadata=meta
         )
         
-        event_data = event.model_dump(exclude={"id"})
+        event_data = event.model_dump(exclude_none=False)
         ref = self._user_events_ref(user_uid).document(event.id)
         await ref.set(event_data)
         return ref.id
@@ -54,7 +54,7 @@ class BehaviorEventRepo(BaseRepository):
         """Lấy danh sách events của user, sắp xếp theo created_at DESC."""
         query = (
             self._user_events_ref(request.user_uid) 
-            .order_by("created_at", direction=Query.DESCENDING)
+            .order_by("last_update", direction=Query.DESCENDING)
             .limit(request.limit)
         )
         if request.last_doc:
@@ -130,7 +130,7 @@ class BehaviorEventRepo(BaseRepository):
         except ValueError as e:
             logger.error(f"Invalid cutoff_iso format: {cutoff_iso}. Error: {e}")
             return 0
-        query = self._db.collection_group(self._subcol_name).where(filter=FieldFilter("created_at", "<", cutoff_dt))
+        query = self._db.collection_group(self._subcol_name).where(filter=FieldFilter("last_update", "<", cutoff_dt))
         deleted_count = 0
         batch = self._db.batch()
         batch_ops = 0
