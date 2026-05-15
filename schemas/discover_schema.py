@@ -250,6 +250,11 @@ class AddressSuggestionRequest(BaseModel):
     gps: Optional[GPSCoordinates] = None
 
 
+class HotelSuggestionRequest(BaseModel):
+    name: str
+    gps: Optional[GPSCoordinates] = None
+
+
 class AddressSuggestion(BaseModel):
     address: Optional[str] = None
     name: Optional[str] = None

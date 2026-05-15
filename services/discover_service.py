@@ -180,6 +180,26 @@ class DiscoverService:
             raise AppException("Failed to get address suggestions", status_code=500)
 
     @staticmethod
+    async def search_hotels(
+        name: str, gps: GPSCoordinates | None = None
+    ) -> ResponseSchema[list[DiscoverHotel]]:
+        """Tìm kiếm khách sạn dựa trên tên và vị trí (nếu có)"""
+        hotel_docs = await hotel_repo.search_hotels_by_name(name)
+        hotels = []
+        for hotel_doc in hotel_docs:
+            try:
+                hotel = DiscoverHotel.from_hotel_document(hotel_doc)
+                if gps and hotel.gps_coordinates:
+                    hotel.distance = haversine_distance(gps, hotel.gps_coordinates)
+                hotels.append(hotel)
+            except Exception as e:
+                logger.error(
+                    f"Error validating hotel data for document {hotel_doc.property_token}: {str(e)}"
+                )
+
+        return ResponseSchema(data=hotels)
+
+    @staticmethod
     async def get_hotel_details(
         hotel_id: str, gps: GPSCoordinates | None = None
     ) -> ResponseSchema[DiscoverHotel]:
