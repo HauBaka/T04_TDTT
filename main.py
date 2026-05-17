@@ -40,9 +40,9 @@ async def lifespan(app: FastAPI):
         logger.error(f"Error initializing virtual review manager: {e}")
 
     # Khởi tạo PhoBERT
-    PhoBERT.load_model()
+    #PhoBERT.load_model()
     # Khởi tạo Semantic Model
-    semantic_model_client.load_model()
+    #semantic_model_client.load_model()
     # Khởi tạo HTTP client
     http_client._http_client = httpx.AsyncClient(timeout=10.0)
     await discover_background_worker.start()

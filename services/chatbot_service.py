@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import asyncio
 import json
 import re
@@ -14,6 +15,7 @@ from externals.GroqLLM import groq_client
 from schemas.chatbot_schema import (
     ChatAskRequest,
     ChatAskResponse,
+    ChatAskStringResponse,
     ChatCitation,
     ChatContextRequest,
     ChatIntent,
@@ -265,7 +267,7 @@ class ChatbotService:
 
         asyncio.create_task(_save())
 
-    async def ask(self, requester_uid: str | None, ask_request: ChatAskRequest) -> ResponseSchema[ChatAskResponse]:
+    async def ask(self, requester_uid: str | None, ask_request: ChatAskRequest) -> ResponseSchema[ChatAskStringResponse]:
         """Điểm vào chính của Chatbot. Nhận yêu cầu, định tuyến, truy xuất, xếp hạng và sinh câu trả lời."""
         timings: dict[str, float] = {}
 
@@ -354,18 +356,17 @@ class ChatbotService:
             timings["total"] = perf_counter() - total_start
             self._log_stage_timings(timings)
             self._save_chat_logs(requester_uid, chatbot_conv_id, user_message, general_answer)
-            return ResponseSchema(
-                data=ChatAskResponse(
-                    intent=decision.intent,
-                    message=user_message,
-                    answer=general_answer,
-                    recommendations=[],
-                    citations=[],
-                    missing_fields=decision.missing_fields,
-                    requires_more_info=decision.requires_more_info,
-                    clarification_question=decision.clarification_question,
-                )
+            general_response = ChatAskResponse(
+                intent=decision.intent,
+                message=user_message,
+                answer=general_answer,
+                recommendations=[],
+                citations=[],
+                missing_fields=decision.missing_fields,
+                requires_more_info=decision.requires_more_info,
+                clarification_question=decision.clarification_question,
             )
+            return ResponseSchema(data=ChatAskStringResponse(payload=general_response.model_dump_json()))
 
         intent = decision.intent
 
@@ -380,18 +381,17 @@ class ChatbotService:
                 False,
             )
             self._save_chat_logs(requester_uid, chatbot_conv_id, user_message, casual_answer)
-            return ResponseSchema(
-                data=ChatAskResponse(
-                    intent=intent,
-                    message=user_message,
-                    answer=casual_answer,
-                    recommendations=[],
-                    citations=[],
-                    missing_fields=decision.missing_fields,
-                    requires_more_info=False,
-                    clarification_question=decision.clarification_question,
-                )
+            casual_response = ChatAskResponse(
+                intent=intent,
+                message=user_message,
+                answer=casual_answer,
+                recommendations=[],
+                citations=[],
+                missing_fields=decision.missing_fields,
+                requires_more_info=False,
+                clarification_question=decision.clarification_question,
             )
+            return ResponseSchema(data=ChatAskStringResponse(payload=casual_response.model_dump_json()))
 
         # Check thông tin bị thiếu
         missing_fields = decision.missing_fields
@@ -472,7 +472,7 @@ class ChatbotService:
         timings["total"] = perf_counter() - total_start
         self._log_stage_timings(timings)
         self._save_chat_logs(requester_uid, chatbot_conv_id, user_message, answer)
-        return ResponseSchema(data=response)
+        return ResponseSchema(data=ChatAskStringResponse(payload=response.model_dump_json()))
 
     async def _hydrate_context_from_text(
         self,
@@ -1363,8 +1363,14 @@ class ChatbotService:
     async def _build_hotel_pool(self, context: ChatContextRequest) -> list:
         """Lấy ra danh sách khách sạn tiềm năng (Candidate Pool) từ cơ sở dữ liệu dựa trên khoảng cách địa lý (Nearby) và toàn cầu (Global)."""
         nearby_task = asyncio.create_task(self._get_nearby_hotels(context))
-        global_task = asyncio.create_task(self._get_global_hotels_cached(self.MAX_GLOBAL_POOL))
-        nearby_hotels, global_hotels = await asyncio.gather(nearby_task, global_task)
+        
+        # Chỉ lấy global hotels nếu không có địa điểm rõ ràng
+        if context.address or context.gps or context.ref_id:
+            nearby_hotels = await nearby_task
+            global_hotels = []
+        else:
+            global_task = asyncio.create_task(self._get_global_hotels_cached(self.MAX_GLOBAL_POOL))
+            nearby_hotels, global_hotels = await asyncio.gather(nearby_task, global_task)
 
         if len(nearby_hotels) >= 25:
             return nearby_hotels
@@ -1638,6 +1644,7 @@ class ChatbotService:
         prompt = (
             "Trả về ĐÚNG MỘT JSON object có key duy nhất là answer.\\n"
             "Không markdown, không text ngoài JSON.\\n"
+            "Giá trị của answer phải là một đoạn văn tiếng Việt liền mạch, tự nhiên, không phải dict, không phải danh sách, không phải key:value rời rạc.\n"
             "Bạn là trợ lý tư vấn du lịch cao cấp cho người Việt.\\n"
             "Nhiệm vụ: trả lời ngắn gọn, thực dụng, đúng dữ liệu gợi ý đầu vào, giữ giọng tự nhiên.\\n"
             "Bắt buộc bám sát các khách sạn đã được ranking sẵn. Không tự bịa thêm khách sạn mới.\\n"
@@ -1662,7 +1669,7 @@ class ChatbotService:
             generated = await asyncio.to_thread(groq_client.generate_content, prompt)
             if generated and generated.strip():
                 parsed = json.loads(generated)
-                answer = str(parsed.get("answer", "")).strip()
+                answer = self._normalize_llm_answer_text(str(parsed.get("answer", "")).strip())
                 if answer:
                     return answer, False
         except Exception as exc:
@@ -1687,6 +1694,7 @@ class ChatbotService:
         prompt = (
             "Trả về ĐÚNG MỘT JSON object có key duy nhất là answer.\\n"
             "Không markdown, không text ngoài JSON.\\n"
+            "Giá trị của answer phải là một đoạn văn tiếng Việt liền mạch, tự nhiên, không phải dict, không phải danh sách, không phải key:value rời rạc.\n"
             "Bạn là chatbot tổng quát cho một web gợi ý nơi lưu trú.\\n"
             "Hãy linh hoạt: vừa trả lời câu hỏi đời thường, vừa hỗ trợ khi user chuyển chủ đề sang lưu trú/du lịch.\\n"
             "Nếu user hỏi thông tin chung: trả lời rõ ràng, không lan man.\\n"
@@ -1701,7 +1709,7 @@ class ChatbotService:
             generated = await asyncio.to_thread(groq_client.generate_content, prompt)
             if generated and generated.strip():
                 parsed = json.loads(generated)
-                answer = str(parsed.get("answer", "")).strip()
+                answer = self._normalize_llm_answer_text(str(parsed.get("answer", "")).strip())
                 if answer:
                     return answer, False
         except Exception as exc:
@@ -1714,22 +1722,16 @@ class ChatbotService:
 
     def _to_recommendation_item(self, hotel) -> ChatRecommendationItem:
         """Chuyển đổi (Map) dữ liệu từ Model Khách sạn thành cấu trúc Schema chuẩn (Recommendation Item) để gửi về cho ứng dụng Frontend."""
-        reasons: list[str] = []
-        hotel_rating = self._hotel_rating(hotel)
-        if hotel_rating is not None:
-            reasons.append(f"Rating hiện tại {hotel_rating:.1f}/5")
-        if hotel.ai_sentiment and hotel.ai_sentiment.ai_score is not None:
-            reasons.append(f"Điểm cảm nhận khách hàng {hotel.ai_sentiment.ai_score:.1f}/5")
-        if hotel.amenities:
-            reasons.append(f"Tiện ích nổi bật: {', '.join(hotel.amenities[:3])}")
-        if hotel.nearby_places:
-            reasons.append(f"Gần {hotel.nearby_places[0].name}")
+        ai_score = hotel.ai_sentiment.ai_score if getattr(hotel, "ai_sentiment", None) and hotel.ai_sentiment.ai_score is not None else None
+        amenities = getattr(hotel, "amenities", []) or []
+
+        reasons: list[str] = [str(a) for a in amenities[:3]] if amenities else []
 
         return ChatRecommendationItem(
             name=hotel.name,
             property_token=hotel.property_token,
             price=hotel.price,
-            ai_score=hotel.ai_sentiment.ai_score if hotel.ai_sentiment else None,
+            ai_score=ai_score,
             address=hotel.address,
             reasons=reasons,
         )
@@ -1847,7 +1849,17 @@ class ChatbotService:
         """Chấm điểm mức độ đáp ứng của khách sạn dựa trên yêu cầu tối thiểu về số sao hoặc điểm đánh giá (Rating) từ người dùng."""
         if min_rating is None:
             return 1.0
-        rating = self._hotel_rating(hotel)
+        # Inline rating extraction (prefer ai_sentiment.ai_score, fallback to raw_rating)
+        ai_sentiment = getattr(hotel, "ai_sentiment", None)
+        ai_score = getattr(ai_sentiment, "ai_score", None) if ai_sentiment else None
+        raw_rating = getattr(hotel, "raw_rating", None)
+
+        rating = None
+        if isinstance(ai_score, (int, float)) and ai_score > 0:
+            rating = float(ai_score)
+        elif isinstance(raw_rating, (int, float)) and raw_rating > 0:
+            rating = float(raw_rating)
+
         if rating is None:
             return 0.0
         if rating >= min_rating:
@@ -1864,8 +1876,22 @@ class ChatbotService:
 
     def _matches_hard_filters(self, hotel, context: ChatContextRequest) -> bool:
         """Thực hiện bộ lọc cứng (Hard Filter) loại bỏ thẳng tay các khách sạn thiếu tiện ích hoặc thiếu sao, giúp giảm sự phụ thuộc rủi ro vào AI Prompt."""
+        # Lọc theo địa điểm nếu được chỉ định
+        if context.address and not self._hotel_matches_location(hotel, context.address):
+            return False
+        
         if context.min_rating is not None:
-            rating = self._hotel_rating(hotel)
+            # Inline rating extraction (prefer ai_sentiment.ai_score, fallback to raw_rating)
+            ai_sentiment = getattr(hotel, "ai_sentiment", None)
+            ai_score = getattr(ai_sentiment, "ai_score", None) if ai_sentiment else None
+            raw_rating = getattr(hotel, "raw_rating", None)
+
+            rating = None
+            if isinstance(ai_score, (int, float)) and ai_score > 0:
+                rating = float(ai_score)
+            elif isinstance(raw_rating, (int, float)) and raw_rating > 0:
+                rating = float(raw_rating)
+
             if rating is None or rating < context.min_rating:
                 return False
 
@@ -1878,32 +1904,44 @@ class ChatbotService:
 
         return True
 
-    def _hotel_rating(self, hotel) -> float | None:
-        """Lấy ra chỉ số sao hoặc điểm đánh giá (Rating) đại diện cho khách sạn từ nhiều nguồn dữ liệu hiện có."""
-        ai_sentiment = getattr(hotel, "ai_sentiment", None)
-        ai_score = getattr(ai_sentiment, "ai_score", None) if ai_sentiment else None
-        raw_rating = getattr(hotel, "raw_rating", None)
-
-        ai_value = float(ai_score) if isinstance(ai_score, (int, float)) and ai_score > 0 else None
-        raw_value = float(raw_rating) if isinstance(raw_rating, (int, float)) and raw_rating > 0 else None
-
-        if ai_value is None and raw_value is None:
-            return None
-
-        if ai_value is not None and raw_value is not None:
-            weighted = (0.6 * ai_value) + (0.4 * raw_value)
-            return max(0.0, min(5.0, weighted))
-
-        fallback = ai_value if ai_value is not None else raw_value
-        if fallback is None:
-            return None
-        return max(0.0, min(5.0, float(fallback)))
+    # _hotel_rating removed per request — rating is inlined where needed
 
     def _hotel_amenities_canonical(self, hotel) -> set[str]:
         """Chuyển toàn bộ danh sách tiện ích của khách sạn về dạng chuẩn hóa từ khóa thống nhất (Canonical) để so khớp thuật toán cực nhanh."""
         values = getattr(hotel, "amenities", []) or []
         normalized = [self._normalize_amenity(str(item)) for item in values if str(item).strip()]
         return {item for item in normalized if item}
+
+    def _hotel_matches_location(self, hotel, requested_location: str) -> bool:
+        """Kiểm tra xem khách sạn có nằm ở địa điểm được yêu cầu không bằng so khớp tên địa chỉ."""
+        if not requested_location:
+            return True
+
+        requested_norm = self._normalize_space(requested_location).lower()
+        
+        # Kiểm tra trong địa chỉ của khách sạn
+        hotel_address = getattr(hotel, "address", "") or ""
+        if hotel_address:
+            hotel_address_norm = self._normalize_space(hotel_address).lower()
+            # Kiểm tra xem tên địa điểm có xuất hiện trong địa chỉ không
+            if requested_norm in hotel_address_norm or hotel_address_norm in requested_norm:
+                return True
+            # Kiểm tra các từ chính trong tên địa điểm
+            location_keywords = requested_norm.split()
+            if len(location_keywords) > 0 and location_keywords[0] in hotel_address_norm:
+                return True
+
+        # Kiểm tra trong nearby_places
+        nearby_places = getattr(hotel, "nearby_places", []) or []
+        for place in nearby_places:
+            place_name = getattr(place, "name", "") or ""
+            if place_name:
+                place_name_norm = self._normalize_space(place_name).lower()
+                if requested_norm in place_name_norm or place_name_norm in requested_norm:
+                    return True
+
+        # Nếu không tìm thấy địa điểm rõ ràng, vẫn chấp nhận (không quá khắt khe)
+        return True
 
     def _has_lodging_signal(self, normalized_message: str) -> bool:
         """Nhận diện tín hiệu lưu trú rõ ràng để tránh đẩy nhầm câu hỏi đa ý vào RAG khách sạn."""
@@ -2040,6 +2078,139 @@ class ChatbotService:
 
         separator = "\n\n" if "\n" not in answer else "\n"
         return f"{answer}{separator}{question}"
+
+    def _normalize_llm_answer_text(self, answer: str) -> str:
+        """Chuyển các câu trả lời dạng dict/JSON giả sang một đoạn văn liền mạch."""
+        normalized = self._normalize_space(answer)
+        if not normalized:
+            return normalized
+
+        if not (normalized.startswith("{") and normalized.endswith("}")):
+            return answer.strip()
+
+        parsed: dict[str, Any] | None = None
+        try:
+            literal = ast.literal_eval(normalized)
+            if isinstance(literal, dict):
+                parsed = literal
+        except (ValueError, SyntaxError):
+            try:
+                parsed_json = json.loads(normalized)
+                if isinstance(parsed_json, dict):
+                    parsed = parsed_json
+            except json.JSONDecodeError:
+                return answer.strip()
+
+        if not parsed:
+            return answer.strip()
+
+        preferred_order = (
+            "khachsan",
+            "name",
+            "gia",
+            "price",
+            "diemai",
+            "rating",
+            "diem",
+            "diachi",
+            "address",
+            "phongthuyet",
+            "phong_thuyet",
+            "ngansach",
+            "budget",
+            "songuoi",
+            "people",
+            "treem",
+            "children",
+            "venich",
+            "vienich",
+            "phongchuyen",
+            "trip_style",
+            "lydo",
+            "reason",
+            "hoi",
+            "question",
+        )
+
+        label_map = {
+            "khachsan": "Khách sạn",
+            "name": "Tên",
+            "gia": "Giá",
+            "price": "Giá",
+            "diemai": "Điểm AI",
+            "rating": "Điểm",
+            "diem": "Điểm",
+            "diachi": "Địa chỉ",
+            "address": "Địa chỉ",
+            "phongthuyet": "Phù hợp",
+            "phong_thuyet": "Phù hợp",
+            "ngansach": "Ngân sách",
+            "budget": "Ngân sách",
+            "songuoi": "Số người",
+            "people": "Số người",
+            "treem": "Trẻ em",
+            "children": "Trẻ em",
+            "venich": "Tiện ích",
+            "vienich": "Tiện ích",
+            "phongchuyen": "Phong cách chuyến đi",
+            "trip_style": "Phong cách chuyến đi",
+            "lydo": "Lý do",
+            "reason": "Lý do",
+        }
+
+        sentences: list[str] = []
+        used_keys: set[str] = set()
+
+        for key in preferred_order:
+            if key not in parsed:
+                continue
+            value = parsed.get(key)
+            if value in (None, "", [], {}):
+                continue
+            used_keys.add(key)
+            display_key = label_map.get(key, key.replace("_", " ").capitalize())
+            if isinstance(value, list):
+                display_value = ", ".join(str(item) for item in value if str(item).strip())
+            else:
+                display_value = self._normalize_space(str(value))
+
+            if key in {"khachsan", "name"}:
+                sentences.append(f"{display_value}")
+            elif key in {"gia", "price"}:
+                sentences.append(f"Giá khoảng {display_value}")
+            elif key in {"diemai", "rating", "diem"}:
+                sentences.append(f"Điểm đánh giá {display_value}")
+            elif key in {"diachi", "address"}:
+                sentences.append(f"Địa chỉ {display_value}")
+            elif key in {"songuoi", "people"}:
+                sentences.append(f"Phù hợp cho {display_value} người")
+            elif key in {"treem", "children"}:
+                sentences.append(f"Trẻ em: {display_value}")
+            elif key in {"lydo", "reason"}:
+                sentences.append(display_value)
+            elif key in {"hoi", "question"}:
+                sentences.append(display_value.rstrip("?？") + "?")
+            else:
+                sentences.append(f"{display_key}: {display_value}")
+
+        for key, value in parsed.items():
+            if key in used_keys or value in (None, "", [], {}):
+                continue
+            if isinstance(value, list):
+                display_value = ", ".join(str(item) for item in value if str(item).strip())
+            else:
+                display_value = self._normalize_space(str(value))
+            if display_value:
+                sentences.append(f"{str(key).replace('_', ' ').capitalize()}: {display_value}")
+
+        cleaned_sentences = [sentence.strip(" ,;.") for sentence in sentences if sentence and sentence.strip()]
+        if not cleaned_sentences:
+            return answer.strip()
+
+        if len(cleaned_sentences) == 1:
+            return cleaned_sentences[0]
+
+        return ". ".join(cleaned_sentences) + "."
 
 
 chatbot_service = ChatbotService()

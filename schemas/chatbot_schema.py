@@ -47,6 +47,7 @@ class ChatRecommendationItem(BaseModel):
     price: float
     ai_score: float | None = None
     address: str | None = None
+    # reasons: simple list of top amenities to show why the hotel is recommended
     reasons: list[str] = Field(default_factory=list)
 
 
@@ -66,3 +67,7 @@ class ChatAskResponse(BaseModel):
     missing_fields: list[str] = Field(default_factory=list)
     requires_more_info: bool = False
     clarification_question: str | None = None
+
+
+class ChatAskStringResponse(BaseModel):
+    payload: str

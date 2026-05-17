@@ -7,7 +7,7 @@ class GroqClient:
     def __init__(self):
         self._url = "https://api.groq.com/openai/v1/chat/completions"
         self._model = "llama-3.1-8b-instant"
-        self._api_key = settings.GROQ_API_KEY
+        self._api_key = settings.GROQ_API_KEY.get_secret_value()
         # Giới hạn timeout Groq ở 6s để chừa đủ ngân sách cho routing và hậu xử lý
         self._http_client = httpx.Client(timeout=6.0) 
     

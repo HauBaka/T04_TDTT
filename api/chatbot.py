@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from core.dependencies import get_current_user
-from schemas.chatbot_schema import ChatAskRequest, ChatAskResponse
+from schemas.chatbot_schema import ChatAskRequest, ChatAskStringResponse
 from schemas.response_schema import ResponseSchema
 from services.chatbot_service import chatbot_service
 
@@ -9,7 +9,7 @@ from services.chatbot_service import chatbot_service
 chatbot_router = APIRouter()
 
 
-@chatbot_router.post("/chatbot/ask", response_model=ResponseSchema[ChatAskResponse])
+@chatbot_router.post("/chatbot/ask", response_model=ResponseSchema[ChatAskStringResponse])
 async def ask_chatbot(
     payload: ChatAskRequest,
     requester=Depends(get_current_user(optional=True)),

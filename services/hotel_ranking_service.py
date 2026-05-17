@@ -11,7 +11,7 @@ from typing import Iterable
 
 from loguru import logger
 
-from schemas.collection_schema import CollectionPublic
+from schemas.collection_schema import CollectionDocument
 from schemas.discover_schema import DiscoverHotel, DiscoverRequest, WeatherInfo
 from schemas.hotel_ranking_schema import (
     HotelRankingItem,
@@ -286,7 +286,7 @@ class HotelRankingService:
         user_weights: ScoringWeights | None,
         profile: UserTravelPreference,
         trip_criteria: TripSearchCriteria | None,
-        collections: list[CollectionPublic],
+        collections: list[CollectionDocument],
         history: list[UserBehaviorEvent],
         weather: list[WeatherInfo] | None,
     ) -> ScoringWeights:
@@ -360,7 +360,7 @@ class HotelRankingService:
         signal: HotelSignal,
         profile: UserTravelPreference,
         trip_criteria: TripSearchCriteria | None,
-        collections: list[CollectionPublic],
+        collections: list[CollectionDocument],
         history: list[UserBehaviorEvent],
         weather: list[WeatherInfo] | None,
         weights: ScoringWeights,
@@ -484,7 +484,7 @@ class HotelRankingService:
         return self._blend_rule_and_semantic(rule_score, semantic_score)
     
     # Chấm mức hợp với bộ sưu tập đã lưu của người dùng.
-    def _collection_affinity_score(self, signal: HotelSignal, collections: list[CollectionPublic]) -> float:
+    def _collection_affinity_score(self, signal: HotelSignal, collections: list[CollectionDocument]) -> float:
         if not collections:
             return 0.5
 
@@ -659,7 +659,7 @@ class HotelRankingService:
             tags.update(self._tokenize(hotel.address))
         return tags
 
-    def _collection_tokens(self, collection: CollectionPublic) -> set[str]:
+    def _collection_tokens(self, collection: CollectionDocument) -> set[str]:
         # Lấy token đặc trưng từ bộ sưu tập.
         tokens = set(self._tokenize(collection.name))
         tokens.update(self._tokenize(collection.description or "", use_model_tokens=True))
@@ -881,7 +881,7 @@ class HotelRankingService:
         ]
         return " | ".join(part for part in parts if part)
     
-    def _collections_semantic_text(self, collections: list[CollectionPublic]) -> str:
+    def _collections_semantic_text(self, collections: list[CollectionDocument]) -> str:
         # Ghép text từ các bộ sưu tập đã lưu.
         parts: list[str] = []
         for collection in collections[:10]:
@@ -955,7 +955,7 @@ class HotelRankingService:
             return places
 
         profile = UserTravelPreference()
-        collections: list[CollectionPublic] = []
+        collections: list[CollectionDocument] = []
         history: list[UserBehaviorEvent] = []
         scoring_weights: ScoringWeights | None = None
 
@@ -976,13 +976,13 @@ class HotelRankingService:
 
                 collection_data = private_user.get("collections", [])
                 if isinstance(collection_data, list):
-                    parsed_collections: list[CollectionPublic] = []
+                    parsed_collections: list[CollectionDocument] = []
                     for item in collection_data:
-                        if isinstance(item, CollectionPublic):
+                        if isinstance(item, CollectionDocument):
                             parsed_collections.append(item)
                         elif isinstance(item, dict):
                             try:
-                                parsed_collections.append(CollectionPublic.model_validate(item))
+                                parsed_collections.append(CollectionDocument.model_validate(item))
                             except Exception:
                                 continue
                     collections = parsed_collections[:50]
