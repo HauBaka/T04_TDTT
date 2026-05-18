@@ -26,8 +26,9 @@ from schemas.discover_schema import DiscoverRequest, DiscoverHotel
 from schemas.response_schema import ResponseSchema
 from externals.VietMapAPI import vietmap_api
 from repositories.hotel_repo import hotel_repo
-from services.hotel_ranking_service import hotel_ranking_service
+from externals.SerpAPI import serp_api
 from services.semantic_encoder import semantic_text_encoder
+from utils.haversine_distance import haversine_distance
 from schemas.trip_context_schema import TravelStyle, TripSearchCriteria
 from services.conversation_service import conversation_service
 from schemas.conversation_schema import SendMessageRequest
@@ -54,7 +55,7 @@ class ChatbotService:
     CONTEXT_ENRICH_LLM_MIN_CONFIDENCE = 0.35
     GEO_CACHE_TTL_SECONDS = 1800 
     GEO_CACHE_MAX_ITEMS = 500  
-    MAX_GLOBAL_POOL = 180 
+    MAX_GLOBAL_POOL = 300
     GLOBAL_POOL_CACHE_TTL_SECONDS = 300  
     NEARBY_POOL_CACHE_TTL_SECONDS = 180  
     NEARBY_POOL_CACHE_MAX_ITEMS = 500  
@@ -436,12 +437,7 @@ class ChatbotService:
                 requires_more_info = True
                 missing_fields = sorted(set([*missing_fields, "constraints"]))
 
-        # Xếp hạng khách sạn
-        stage_start = perf_counter()
-        ranked_hotels = await self._rerank_with_internal_ranker(context, requester_uid, retrieved)
-        timings["rerank"] = perf_counter() - stage_start
-
-        selected_hotels = ranked_hotels[: context.max_ranked_hotels]
+        selected_hotels = [item.hotel for item in retrieved[: context.max_ranked_hotels]]
         recommendations = [self._to_recommendation_item(item) for item in selected_hotels]
         citations = [self._to_citation(item, retrieved) for item in selected_hotels]
 
@@ -840,29 +836,214 @@ class ChatbotService:
 
     def _extract_destination(self, original_message: str, normalized_message: str) -> str | None:
         """Trích xuất tên địa điểm du lịch phổ biến (ví dụ: Đà Nẵng, Phú Quốc) từ tin nhắn của người dùng dựa trên bộ Regex."""
-        city_aliases = {
-            "ha noi": "Hà Nội",
-            "hà nội": "Hà Nội",
-            "ho chi minh": "TP. Hồ Chí Minh",
+        raw_aliases = {
+            "thành phố hồ chí minh": "TP. Hồ Chí Minh",
+            "thanh pho ho chi minh": "TP. Hồ Chí Minh",
+            "tp. hồ chí minh": "TP. Hồ Chí Minh",
+            "tp. ho chi minh": "TP. Hồ Chí Minh",
+            "tp hồ chí minh": "TP. Hồ Chí Minh",
+            "tp ho chi minh": "TP. Hồ Chí Minh",
             "hồ chí minh": "TP. Hồ Chí Minh",
-            "sai gon": "TP. Hồ Chí Minh",
+            "ho chi minh": "TP. Hồ Chí Minh",
             "sài gòn": "TP. Hồ Chí Minh",
-            "da nang": "Đà Nẵng",
+            "sai gon": "TP. Hồ Chí Minh",
+            "tphcm": "TP. Hồ Chí Minh",
+            "hà nội": "Hà Nội",
+            "ha noi": "Hà Nội",
             "đà nẵng": "Đà Nẵng",
+            "da nang": "Đà Nẵng",
             "nha trang": "Nha Trang",
-            "da lat": "Đà Lạt",
             "đà lạt": "Đà Lạt",
-            "phu quoc": "Phú Quốc",
+            "da lat": "Đà Lạt",
             "phú quốc": "Phú Quốc",
-            "hoi an": "Hội An",
+            "phu quoc": "Phú Quốc",
             "hội an": "Hội An",
-            "ha long": "Hạ Long",
+            "hoi an": "Hội An",
             "hạ long": "Hạ Long",
-            "vung tau": "Vũng Tàu",
+            "ha long": "Hạ Long",
             "vũng tàu": "Vũng Tàu",
-            "quy nhon": "Quy Nhơn",
+            "vung tau": "Vũng Tàu",
+            "bà rịa vũng tàu": "Bà Rịa - Vũng Tàu",
+            "ba ria vung tau": "Bà Rịa - Vũng Tàu",
+            "bà rịa - vũng tàu": "Bà Rịa - Vũng Tàu",
+            "ba ria - vung tau": "Bà Rịa - Vũng Tàu",
+            "bà rịa": "Bà Rịa - Vũng Tàu",
+            "ba ria": "Bà Rịa - Vũng Tàu",
             "quy nhơn": "Quy Nhơn",
+            "quy nhon": "Quy Nhơn",
+            "an giang": "An Giang",
+            "bạc liêu": "Bạc Liêu",
+            "bac lieu": "Bạc Liêu",
+            "bắc giang": "Bắc Giang",
+            "bac giang": "Bắc Giang",
+            "bắc kạn": "Bắc Kạn",
+            "bac kan": "Bắc Kạn",
+            "bắc cạn": "Bắc Kạn",
+            "bac can": "Bắc Kạn",
+            "bắc ninh": "Bắc Ninh",
+            "bac ninh": "Bắc Ninh",
+            "bến tre": "Bến Tre",
+            "ben tre": "Bến Tre",
+            "bình dương": "Bình Dương",
+            "binh duong": "Bình Dương",
+            "bình định": "Bình Định",
+            "binh dinh": "Bình Định",
+            "bình phước": "Bình Phước",
+            "binh phuoc": "Bình Phước",
+            "bình thuận": "Bình Thuận",
+            "binh thuan": "Bình Thuận",
+            "phan thiết": "Phan Thiết",
+            "phan thiet": "Phan Thiết",
+            "mũi né": "Mũi Né",
+            "mui ne": "Mũi Né",
+            "cà mau": "Cà Mau",
+            "ca mau": "Cà Mau",
+            "cao bằng": "Cao Bằng",
+            "cao bang": "Cao Bằng",
+            "cần thơ": "Cần Thơ",
+            "can tho": "Cần Thơ",
+            "đắk lắk": "Đắk Lắk",
+            "dak lak": "Đắk Lắk",
+            "đắc lắc": "Đắk Lắk",
+            "dac lac": "Đắk Lắk",
+            "buôn ma thuột": "Buôn Ma Thuột",
+            "buon ma thuot": "Buôn Ma Thuột",
+            "bmt": "Buôn Ma Thuột",
+            "đắk nông": "Đắk Nông",
+            "dak nong": "Đắk Nông",
+            "đắc nông": "Đắk Nông",
+            "dac nong": "Đắk Nông",
+            "điện biên": "Điện Biên",
+            "dien bien": "Điện Biên",
+            "đồng nai": "Đồng Nai",
+            "dong nai": "Đồng Nai",
+            "biên hòa": "Biên Hòa",
+            "bien hoa": "Biên Hòa",
+            "đồng tháp": "Đồng Tháp",
+            "dong thap": "Đồng Tháp",
+            "cao lãnh": "Cao Lãnh",
+            "cao lanh": "Cao Lãnh",
+            "sa đéc": "Sa Đéc",
+            "sa dec": "Sa Đéc",
+            "gia lai": "Gia Lai",
+            "pleiku": "Pleiku",
+            "plei ku": "Pleiku",
+            "hà giang": "Hà Giang",
+            "ha giang": "Hà Giang",
+            "hà nam": "Hà Nam",
+            "ha nam": "Hà Nam",
+            "phủ lý": "Phủ Lý",
+            "phu ly": "Phủ Lý",
+            "hà tĩnh": "Hà Tĩnh",
+            "ha tinh": "Hà Tĩnh",
+            "hải dương": "Hải Dương",
+            "hai duong": "Hải Dương",
+            "hải phòng": "Hải Phòng",
+            "hai phong": "Hải Phòng",
+            "hậu giang": "Hậu Giang",
+            "hau giang": "Hậu Giang",
+            "vị thanh": "Vị Thanh",
+            "vi thanh": "Vị Thanh",
+            "hòa bình": "Hòa Bình",
+            "hoa binh": "Hòa Bình",
+            "hưng yên": "Hưng Yên",
+            "hung yen": "Hưng Yên",
+            "khánh hòa": "Khánh Hòa",
+            "khanh hoa": "Khánh Hòa",
+            "cam ranh": "Cam Ranh",
+            "kiên giang": "Kiên Giang",
+            "kien giang": "Kiên Giang",
+            "hà tiên": "Hà Tiên",
+            "ha tien": "Hà Tiên",
+            "rạch giá": "Rạch Giá",
+            "rach gia": "Rạch Giá",
+            "kon tum": "Kon Tum",
+            "kontum": "Kon Tum",
+            "lai châu": "Lai Châu",
+            "lai chau": "Lai Châu",
+            "lạng sơn": "Lạng Sơn",
+            "lang son": "Lạng Sơn",
+            "lào cai": "Lào Cai",
+            "lao cai": "Lào Cai",
+            "sa pa": "Sa Pa",
+            "sapa": "Sa Pa",
+            "long an": "Long An",
+            "tân an": "Tân An",
+            "tan an": "Tân An",
+            "nam định": "Nam Định",
+            "nam dinh": "Nam Định",
+            "nghệ an": "Nghệ An",
+            "nghe an": "Nghệ An",
+            "vinh": "Vinh",
+            "ninh bình": "Ninh Bình",
+            "ninh binh": "Ninh Bình",
+            "ninh thuận": "Ninh Thuận",
+            "ninh thuan": "Ninh Thuận",
+            "phan rang": "Phan Rang - Tháp Chàm",
+            "phan rang - tháp chàm": "Phan Rang - Tháp Chàm",
+            "phan rang thap cham": "Phan Rang - Tháp Chàm",
+            "phú thọ": "Phú Thọ",
+            "phu tho": "Phú Thọ",
+            "việt trì": "Việt Trì",
+            "viet tri": "Việt Trì",
+            "phú yên": "Phú Yên",
+            "phu yen": "Phú Yên",
+            "tuy hòa": "Tuy Hòa",
+            "tuy hoa": "Tuy Hòa",
+            "quảng bình": "Quảng Bình",
+            "quang binh": "Quảng Bình",
+            "đồng hới": "Đồng Hới",
+            "dong hoi": "Đồng Hới",
+            "quảng nam": "Quảng Nam",
+            "quang nam": "Quảng Nam",
+            "tam kỳ": "Tam Kỳ",
+            "tam ky": "Tam Kỳ",
+            "quảng ngãi": "Quảng Ngãi",
+            "quang ngai": "Quảng Ngãi",
+            "quảng ninh": "Quảng Ninh",
+            "quang ninh": "Quảng Ninh",
+            "móng cái": "Móng Cái",
+            "mong cai": "Móng Cái",
+            "cẩm phả": "Cẩm Phả",
+            "cam pha": "Cẩm Phả",
+            "quảng trị": "Quảng Trị",
+            "quang tri": "Quảng Trị",
+            "đông hà": "Đông Hà",
+            "dong ha": "Đông Hà",
+            "sóc trăng": "Sóc Trăng",
+            "soc trang": "Sóc Trăng",
+            "sơn la": "Sơn La",
+            "son la": "Sơn La",
+            "tây ninh": "Tây Ninh",
+            "tay ninh": "Tây Ninh",
+            "thái bình": "Thái Bình",
+            "thai binh": "Thái Bình",
+            "thái nguyên": "Thái Nguyên",
+            "thai nguyen": "Thái Nguyên",
+            "thanh hóa": "Thanh Hóa",
+            "thanh hoa": "Thanh Hóa",
+            "thừa thiên huế": "Thừa Thiên Huế",
+            "thua thien hue": "Thừa Thiên Huế",
+            "huế": "Huế",
+            "hue": "Huế",
+            "tiền giang": "Tiền Giang",
+            "tien giang": "Tiền Giang",
+            "mỹ tho": "Mỹ Tho",
+            "my tho": "Mỹ Tho",
+            "trà vinh": "Trà Vinh",
+            "tra vinh": "Trà Vinh",
+            "tuyên quang": "Tuyên Quang",
+            "tuyen quang": "Tuyên Quang",
+            "vĩnh long": "Vĩnh Long",
+            "vinh long": "Vĩnh Long",
+            "vĩnh phúc": "Vĩnh Phúc",
+            "vinh phuc": "Vĩnh Phúc",
+            "yên bái": "Yên Bái",
+            "yen bai": "Yên Bái",
+            "bảo lộc": "Bảo Lộc",
+            "bao loc": "Bảo Lộc",
         }
+        city_aliases = {k: v for k, v in sorted(raw_aliases.items(), key=lambda item: len(item[0]), reverse=True)}
         for alias, canonical in city_aliases.items():
             if alias in normalized_message:
                 return canonical
@@ -1360,17 +1541,17 @@ class ChatbotService:
 
     async def _build_hotel_pool(self, context: ChatContextRequest) -> list:
         """Lấy ra danh sách khách sạn tiềm năng (Candidate Pool) từ cơ sở dữ liệu dựa trên khoảng cách địa lý (Nearby) và toàn cầu (Global)."""
-        nearby_task = asyncio.create_task(self._get_nearby_hotels(context))
+        nearby_hotels = await self._get_nearby_hotels(context)
+        global_hotels = []
         
         # Chỉ lấy global hotels nếu không có địa điểm rõ ràng
-        if context.address or context.gps or context.ref_id:
-            nearby_hotels = await nearby_task
-            global_hotels = []
-        else:
-            global_task = asyncio.create_task(self._get_global_hotels_cached(self.MAX_GLOBAL_POOL))
-            nearby_hotels, global_hotels = await asyncio.gather(nearby_task, global_task)
+        if not context.address and not context.gps and not context.ref_id:
+            global_hotels = await self._get_global_hotels_cached(self.MAX_GLOBAL_POOL)
 
-        if len(nearby_hotels) >= 25:
+        print("nearby_hotels", len(nearby_hotels))
+        print("global_hotels", len(global_hotels))
+
+        if len(nearby_hotels) >= 5:
             return nearby_hotels
 
         merged: dict[str, object] = {}
@@ -1380,7 +1561,38 @@ class ChatbotService:
             if key:
                 merged[key] = hotel
 
-        return list(merged.values())
+        final_pool = list(merged.values())
+
+        # Bổ sung Fallback gọi SerpAPI nếu DB trả về 0 kết quả
+        if not final_pool and (context.address or context.gps):
+            query = context.address
+            if not query and context.gps:
+                query = f"{context.gps.latitude},{context.gps.longitude}"
+            if query:
+                now = datetime.now(timezone.utc)
+                check_in = context.check_in or (now + timedelta(days=7))
+                check_out = context.check_out or (check_in + timedelta(days=2))
+                try:
+                    serp_result = await serp_api.search_places(
+                        query=query,
+                        check_in_date=check_in.strftime("%Y-%m-%d"),
+                        check_out_date=check_out.strftime("%Y-%m-%d"),
+                        adults=context.adults or 2,
+                        children=len(context.children) if context.children else 0,
+                    )
+                    if serp_result and serp_result.data:
+                        final_pool = serp_result.data
+                        try:
+                            from services.discover_background_worker import discover_background_worker
+                            enqueued = discover_background_worker.enqueue(final_pool, {})
+                            if not enqueued:
+                                logger.warning("Failed to enqueue SerpAPI results in Chatbot fallback")
+                        except Exception as bg_exc:
+                            logger.warning(f"Error triggering background worker: {str(bg_exc)}")
+                except Exception as exc:
+                    logger.warning(f"SerpAPI fallback failed in Chatbot: {str(exc)}")
+
+        return final_pool
 
     async def _get_global_hotels_cached(self, limit: int) -> list:
         """Lấy danh sách toàn bộ khách sạn từ bộ nhớ đệm (Cache) để giảm tải và hạn chế việc query liên tục vào Firestore."""
@@ -1540,65 +1752,6 @@ class ChatbotService:
     def _semantic_shortlist_limit(self, limit: int) -> int:
         """Giới hạn số lượng ứng viên khách sạn tối đa được phép chạy qua bộ mã hóa vector (Semantic Encoding) - giảm từ 180 xuống 120 để tốc độ."""
         return min(limit, 120)
-
-    async def _rerank_with_internal_ranker(
-        self,
-        context: ChatContextRequest,
-        requester_uid: str | None,
-        retrieved: list[RetrievedHotel],
-    ) -> list:
-        """Xếp hạng lại (Rerank) các khách sạn đã lọc bằng dịch vụ chấm điểm nội bộ, kết hợp thêm yếu tố thời tiết và hồ sơ cá nhân hóa của người dùng."""
-        if not retrieved:
-            return []
-
-        now = datetime.now(timezone.utc)
-        check_in = context.check_in or (now + timedelta(days=7))
-        check_out = context.check_out or (check_in + timedelta(days=2))
-
-        if check_in.tzinfo is None:
-            check_in = check_in.replace(tzinfo=timezone.utc)
-        if check_out.tzinfo is None:
-            check_out = check_out.replace(tzinfo=timezone.utc)
-        if check_out <= check_in:
-            check_out = check_in + timedelta(days=2)
-
-        safe_children = self._sanitize_children(context.children)
-
-        # Dùng cùng payload chuẩn để tận dụng logic personal ranking đã có sẵn.
-        payload = DiscoverRequest(
-            address=context.address or "Việt Nam",
-            gps=context.gps,
-            ref_id=context.ref_id,
-            check_in=check_in,
-            check_out=check_out,
-            children=safe_children,
-            adults=context.adults,
-            personality=context.personality,
-            trip_style=context.trip_style,
-            trip_criteria=TripSearchCriteria(
-                budget_min=context.min_price,
-                budget_max=context.max_price,
-                trip_style=context.trip_style,
-                party_size=(context.adults or 0) + len(context.children or []),
-            ),
-            max_ranked_hotels=max(1, min(context.max_ranked_hotels * 2, 20)),
-        )
-
-        hotels = [item.hotel for item in retrieved]
-
-        # Skip weather loading để giảm latency (weather không critical cho ranking)
-        weather_by_identity: dict[str, list] = {}
-
-        try:
-            return await hotel_ranking_service.rank_discovered_hotels(
-                places=hotels,
-                payload=payload,
-                weather_by_identity=weather_by_identity,
-                requester_uid=requester_uid,
-            )
-        except Exception as exc:
-            logger.warning(f"Internal ranking failed in chatbot RAG: {str(exc)}")
-            return hotels
 
     async def _build_answer(
         self,
@@ -1877,10 +2030,6 @@ class ChatbotService:
 
     def _matches_hard_filters(self, hotel, context: ChatContextRequest) -> bool:
         """Thực hiện bộ lọc cứng (Hard Filter) loại bỏ thẳng tay các khách sạn thiếu tiện ích hoặc thiếu sao, giúp giảm sự phụ thuộc rủi ro vào AI Prompt."""
-        # Lọc theo địa điểm nếu được chỉ định
-        if context.address and not self._hotel_matches_location(hotel, context.address):
-            return False
-        
         if context.min_rating is not None:
             # Inline rating extraction (prefer ai_sentiment.ai_score, fallback to raw_rating)
             ai_sentiment = getattr(hotel, "ai_sentiment", None)
@@ -1913,36 +2062,7 @@ class ChatbotService:
         normalized = [self._normalize_amenity(str(item)) for item in values if str(item).strip()]
         return {item for item in normalized if item}
 
-    def _hotel_matches_location(self, hotel, requested_location: str) -> bool:
-        """Kiểm tra xem khách sạn có nằm ở địa điểm được yêu cầu không bằng so khớp tên địa chỉ."""
-        if not requested_location:
-            return True
 
-        requested_norm = self._normalize_space(requested_location).lower()
-        
-        # Kiểm tra trong địa chỉ của khách sạn
-        hotel_address = getattr(hotel, "address", "") or ""
-        if hotel_address:
-            hotel_address_norm = self._normalize_space(hotel_address).lower()
-            # Kiểm tra xem tên địa điểm có xuất hiện trong địa chỉ không
-            if requested_norm in hotel_address_norm or hotel_address_norm in requested_norm:
-                return True
-            # Kiểm tra các từ chính trong tên địa điểm
-            location_keywords = requested_norm.split()
-            if len(location_keywords) > 0 and location_keywords[0] in hotel_address_norm:
-                return True
-
-        # Kiểm tra trong nearby_places
-        nearby_places = getattr(hotel, "nearby_places", []) or []
-        for place in nearby_places:
-            place_name = getattr(place, "name", "") or ""
-            if place_name:
-                place_name_norm = self._normalize_space(place_name).lower()
-                if requested_norm in place_name_norm or place_name_norm in requested_norm:
-                    return True
-
-        # Nếu không tìm thấy địa điểm rõ ràng, vẫn chấp nhận (không quá khắt khe)
-        return True
 
     def _has_lodging_signal(self, normalized_message: str) -> bool:
         """Nhận diện tín hiệu lưu trú rõ ràng để tránh đẩy nhầm câu hỏi đa ý vào RAG khách sạn."""
