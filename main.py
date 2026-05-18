@@ -6,6 +6,26 @@ from fastapi.concurrency import asynccontextmanager
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from api.health import health_router
+from api.discover import discover_router
+from api.auth import auth_router
+from api.user import user_router
+from api.collection import collection_router
+from api.invitation import invitation_router
+from api.notification import notification_router
+from api.conversation import conversation_router
+from api.trip import trip_router
+from api.chatbot import chatbot_router
+from api.view import view_router
+from api.upload import upload_router
+from core.database import firebase_manager
+from core.exceptions import AppException
+from core.limiter import limiter, AutoRateLimitMiddleware
+from slowapi.middleware import SlowAPIMiddleware
+from mock_data.virtual_review import virtual_review_manager
+from externals.PhoBERT import PhoBERT
+from externals.SemanticModel import semantic_model_client
+from services.discover_background_worker import discover_background_worker
 from loguru import logger
 from slowapi.middleware import SlowAPIMiddleware
 
@@ -43,8 +63,10 @@ async def lifespan(app: FastAPI):
     # semantic_model_client.load_model()
     # Khởi tạo HTTP client
     http_client._http_client = httpx.AsyncClient(timeout=10.0)
+    await discover_background_worker.start()
     yield
 
+    await discover_background_worker.stop()
     if http_client._http_client:
         await http_client._http_client.aclose()
 
@@ -95,6 +117,7 @@ app.include_router(invitation_router, tags=["invitation"])
 app.include_router(notification_router, tags=["notification"])
 app.include_router(conversation_router, tags=["conversation"])
 app.include_router(trip_router, tags=["trip"])
+app.include_router(chatbot_router, tags=["chatbot"])
 app.include_router(view_router, tags=["view"])
 app.include_router(upload_router, tags=["uploads"])
 
