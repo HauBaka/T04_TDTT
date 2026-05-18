@@ -24,26 +24,25 @@ class BehaviorEventRepo(BaseRepository):
     
     async def create_event(self, user_uid: str, request: UserBehaviorEventCreateRequest) -> str:
         """Lưu một event vào Firestore, trả về document ID."""
-        if request.target_id:
-            event_id = f"{request.event_type.value}_{request.target_id}"
-        else:
-            event_id = f"{request.event_type.value}_{uuid.uuid4().hex[:8]}"
             
         meta = request.metadata.copy() if request.metadata else {}
         
         if request.source:
             meta["source"] = request.source   
-        event = UserBehaviorEventDocument(
-            id=event_id,
+        
+        ref = self._user_events_ref(user_uid).document()
+        
+        event_doc = UserBehaviorEventDocument(
+            id=ref.id,
             user_uid=user_uid,
             event_type=request.event_type,
             target_id=request.target_id,
             target_name=request.target_name,
+            created_at=self._current_timestamp,
             metadata=meta
-        )
+            )
         
-        event_data = event.model_dump(exclude_none=False)
-        ref = self._user_events_ref(user_uid).document(event.id)
+        event_data = event_doc.model_dump(exclude_none=False)
         await ref.set(event_data)
         return ref.id
     
@@ -54,7 +53,7 @@ class BehaviorEventRepo(BaseRepository):
         """Lấy danh sách events của user, sắp xếp theo created_at DESC."""
         query = (
             self._user_events_ref(request.user_uid) 
-            .order_by("last_update", direction=Query.DESCENDING)
+            .order_by("created_at", direction=Query.DESCENDING) 
             .limit(request.limit)
         )
         if request.last_doc:
@@ -130,7 +129,7 @@ class BehaviorEventRepo(BaseRepository):
         except ValueError as e:
             logger.error(f"Invalid cutoff_iso format: {cutoff_iso}. Error: {e}")
             return 0
-        query = self._db.collection_group(self._subcol_name).where(filter=FieldFilter("last_update", "<", cutoff_dt))
+        query = self._db.collection_group(self._subcol_name).where(filter=FieldFilter("created_at", "<", cutoff_dt))
         deleted_count = 0
         batch = self._db.batch()
         batch_ops = 0

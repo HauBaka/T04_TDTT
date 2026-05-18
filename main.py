@@ -5,7 +5,7 @@ from fastapi.concurrency import asynccontextmanager
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from api.health import health_router
-from api.discover import discover_router
+#from api.discover import discover_router
 from api.auth import auth_router
 from api.user import user_router
 from api.collection import collection_router
@@ -38,9 +38,9 @@ async def lifespan(app: FastAPI):
         logger.error(f"Error initializing virtual review manager: {e}")
 
     # Khởi tạo PhoBERT
-    PhoBERT.load_model()
-    # Khởi tạo Semantic Model
-    semantic_model_client.load_model()
+    # PhoBERT.load_model()
+    # # Khởi tạo Semantic Model
+    # semantic_model_client.load_model()
     # Khởi tạo HTTP client
     http_client._http_client = httpx.AsyncClient(timeout=10.0)
     yield
@@ -82,7 +82,7 @@ async def log_requests(request: Request, call_next):
     return response
 # Đăng ký router
 app.include_router(health_router, tags=["health"])
-app.include_router(discover_router, tags=["discover"])
+#app.include_router(discover_router, tags=["discover"])
 app.include_router(auth_router, tags=["auth"])
 app.include_router(user_router, tags=["user"])
 app.include_router(collection_router, tags=["collection"])

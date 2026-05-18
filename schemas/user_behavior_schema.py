@@ -29,5 +29,4 @@ class UserBehaviorEventDocument(BaseModel):
     target_id: str | None = None
     target_name: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    last_update: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: dict[str, str] = Field(default_factory=dict)
