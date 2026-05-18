@@ -69,28 +69,79 @@ class UserRepository(BaseRepository):
             raise ValidationError("No user IDs provided")
 
         unique_uids = list(set(uids))
-        result = {}
-        chunk_size = 30
+        # Cache lookup
+        cache_keys = {
+            uid: self._build_cache_key("id", uid)
+            for uid in unique_uids
+        }
 
+        cached_items = await self._get_many_from_cache(
+            list(cache_keys.values())
+        )
+
+        result: dict[str, UserDocument] = {}
+        missing_uids = []
+
+        for uid, cache_key_str in cache_keys.items():
+            cached = cached_items.get(cache_key_str)
+
+            if cached is None:
+                missing_uids.append(uid)
+                continue
+
+            try:
+                result[uid] = UserDocument.model_validate(cached)
+            except PydanticValidationError as e:
+                logger.error(
+                    f"Error validating cached user data for uid {uid}: {str(e)}"
+                )
+
+                missing_uids.append(uid)
+
+        # Tất cả đều có cache
+        if not missing_uids:
+            return result
+
+        chunk_size = 30
         tasks = []
-        for i in range(0, len(unique_uids), chunk_size):
-            chunk = unique_uids[i : i + chunk_size]
-            query = self._collection.where(filter=FieldFilter("uid", "in", chunk)).get()
+
+        for i in range(0, len(missing_uids), chunk_size):
+            chunk = missing_uids[i : i + chunk_size]
+
+            query = self._collection.where(
+                filter=FieldFilter("uid", "in", chunk)
+            ).get()
+
             tasks.append(query)
 
-        results_list = await asyncio.gather(*tasks)
-        for docs in results_list:
-            for doc in docs:
-                user_data = doc.to_dict()
-                # Thêm if để pass qua khâu check lỗi của Pylance
-                if user_data:
+        try:
+            results_list = await asyncio.gather(*tasks)
+
+            cache_payload = {}
+
+            for docs in results_list:
+                for doc in docs:
+                    user_data = doc.to_dict()
+
+                    if not user_data:
+                        continue
+
                     user_data["uid"] = doc.id
                     try:
                         result[doc.id] = UserDocument.model_validate(user_data)
+                        cache_payload[
+                            self._build_cache_key("id", doc.id)
+                        ] = user_data
                     except PydanticValidationError as e:
                         logger.error(
                             f"Error validating user data for uid {doc.id}: {str(e)}"
                         )
+
+            if cache_payload:
+                await self._set_many_to_cache(cache_payload)
+
+        except Exception:
+            logger.exception("Error fetching users")
 
         return result
 

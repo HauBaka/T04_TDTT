@@ -1,5 +1,6 @@
 from loguru import logger
 
+from core.cache import cache_get, cache_key, cache_set
 from core.exceptions import AppException, NotFoundError
 from externals.SerpAPI import serp_api
 from externals.VietMapAPI import vietmap_api
@@ -52,6 +53,11 @@ class DiscoverService:
 
     async def execute_discover_pipeline(self) -> DiscoverResponse:
         """Thực thi pipeline tìm kiếm"""
+        key = self._build_cache_key()
+        cache_response = await self._get_from_cache()
+        if cache_response:
+            return cache_response
+
         gps_coordinates = None
         if self.payload.ref_id:
             # Nếu có ref_id, ưu tiên lấy GPS từ VietMap để có kết quả chính xác hơn
@@ -148,7 +154,12 @@ class DiscoverService:
         await self._detail_searching_place()
         await self._calculate_distance_for_results(raw_results)
 
-        return DiscoverResponse(searching_place=self.searching_place, data=raw_results)
+        # Cache the result
+        result = DiscoverResponse(searching_place=self.searching_place, data=raw_results)
+        
+        await cache_set(key, DiscoverResponse(searching_place=self.searching_place, data=raw_results))
+
+        return result
 
     @staticmethod
     async def suggest_addresses(
@@ -257,3 +268,29 @@ class DiscoverService:
                     ),
                     hotel.gps_coordinates,
                 )
+
+    def _build_cache_key(self) -> str:
+        """Xây dựng cache key dựa trên payload đầu vào"""
+        return cache_key(
+            "discover",
+            self.payload.address or "",
+            str(self.payload.check_in),
+            str(self.payload.check_out),
+            str(self.payload.adults),
+            str(self.payload.children),
+            str(self.payload.ref_id or ""),
+        )
+
+    async def _get_from_cache(self) -> DiscoverResponse | None:
+        """Thử lấy kết quả từ cache dựa trên payload đầu vào"""
+        key = self._build_cache_key()
+
+        cached = await cache_get(key)
+        if cached:
+            try:
+                return DiscoverResponse.model_validate(cached)
+            except Exception as exc:
+                logger.warning(f"Failed to parse cached discover response: {cached}, error: {str(exc)}")
+                return None
+        
+        return None

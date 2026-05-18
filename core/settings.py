@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     SERP_API_KEY: SecretStr
     GEMINI_API_KEY: SecretStr
     VIETMAP_API_KEY: SecretStr
+    GROQ_API_KEY: SecretStr
     GEOHASH_PRECISION: int = 5
 
     HOTEL_DATA_EXPIRE_DAYS: int = 30
@@ -23,6 +24,11 @@ class Settings(BaseSettings):
     R2_MAX_FILE_SIZE_MB: int = 10
     R2_ALLOWED_IMAGE_MIME_TYPES: str = "image/jpeg,image/png,image/webp,image/gif"
     UPLOAD_PENDING_TTL_MINUTES: int = 30
+
+    # Redis
+    REDIS_URL: str
+    REDIS_PREFIX: str
+    REDIS_CACHE_DEBUG: bool = False
 
     model_config = SettingsConfigDict(
         env_file=".env",
