@@ -1548,9 +1548,6 @@ class ChatbotService:
         if not context.address and not context.gps and not context.ref_id:
             global_hotels = await self._get_global_hotels_cached(self.MAX_GLOBAL_POOL)
 
-        print("nearby_hotels", len(nearby_hotels))
-        print("global_hotels", len(global_hotels))
-
         if len(nearby_hotels) >= 5:
             return nearby_hotels
 
