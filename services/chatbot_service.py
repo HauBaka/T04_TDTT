@@ -10,6 +10,7 @@ from time import perf_counter
 from typing import Any
 
 from loguru import logger
+from fastapi import BackgroundTasks
 
 from externals.GroqLLM import groq_client
 from schemas.chatbot_schema import (
@@ -27,7 +28,7 @@ from externals.VietMapAPI import vietmap_api
 from repositories.hotel_repo import hotel_repo
 from services.hotel_ranking_service import hotel_ranking_service
 from services.semantic_encoder import semantic_text_encoder
-from schemas.trip_context_schema import TravelStyle
+from schemas.trip_context_schema import TravelStyle, TripSearchCriteria
 from services.conversation_service import conversation_service
 from schemas.conversation_schema import SendMessageRequest
 
@@ -249,25 +250,22 @@ class ChatbotService:
             return True
         return any(keyword in normalized for keyword in complexity_keywords)
 
-    def _save_chat_logs(self, requester_uid: str | None, chatbot_conv_id: str | None, user_message: str, bot_response: str) -> None:
-        """Lưu lại tin nhắn ngầm vào conversation service để không block API."""
+    async def _save_chat_logs(self, requester_uid: str | None, chatbot_conv_id: str | None, user_message: str, bot_response: str, background_tasks: BackgroundTasks) -> None:
+        """Lưu lại tin nhắn ngầm vào conversation service. Uses API BackgroundTasks."""
         if not requester_uid or not chatbot_conv_id:
             return
 
-        async def _save():
-            try:
-                await conversation_service.send_message_to_conversation(
-                    chatbot_conv_id, requester_uid, SendMessageRequest(content=user_message)
-                )
-                await conversation_service.send_message_to_conversation(
-                    chatbot_conv_id, "chatbot_system", SendMessageRequest(content=bot_response)
-                )
-            except Exception as e:
-                logger.error(f"Failed to save chat logs: {e}")
+        try:
+            await conversation_service.send_message_to_conversation(
+                chatbot_conv_id, requester_uid, SendMessageRequest(content=user_message), background_tasks=background_tasks
+            )
+            await conversation_service.send_message_to_conversation(
+                chatbot_conv_id, "chatbot_system", SendMessageRequest(content=bot_response), background_tasks=background_tasks
+            )
+        except Exception as e:
+            logger.error(f"Failed to save chat logs: {e}")
 
-        asyncio.create_task(_save())
-
-    async def ask(self, requester_uid: str | None, ask_request: ChatAskRequest) -> ResponseSchema[ChatAskStringResponse]:
+    async def ask(self, requester_uid: str | None, ask_request: ChatAskRequest, background_tasks: BackgroundTasks) -> ResponseSchema[ChatAskStringResponse]:
         """Điểm vào chính của Chatbot. Nhận yêu cầu, định tuyến, truy xuất, xếp hạng và sinh câu trả lời."""
         timings: dict[str, float] = {}
 
@@ -285,8 +283,8 @@ class ChatbotService:
                         # Ghi đè history từ DB (từ cũ đến mới) kèm tiền tố User/Bot
                         formatted_history = []
                         for msg in reversed(msgs_res.data):
-                            content = msg.content if hasattr(msg, "content") else msg.get("content", "")
-                            sender = msg.sender_uid if hasattr(msg, "sender_uid") else msg.get("sender_uid", "")
+                            content = msg.content if hasattr(msg, "content") else getattr(msg, "content", "")
+                            sender = msg.sender_uid if hasattr(msg, "sender_uid") else getattr(msg, "sender_uid", "")
                             prefix = "User" if sender == requester_uid else "Bot"
                             formatted_history.append(f"{prefix}: {content}")
                         ask_request.history = formatted_history
@@ -355,7 +353,7 @@ class ChatbotService:
             timings["general_answer"] = perf_counter() - stage_start
             timings["total"] = perf_counter() - total_start
             self._log_stage_timings(timings)
-            self._save_chat_logs(requester_uid, chatbot_conv_id, user_message, general_answer)
+            await self._save_chat_logs(requester_uid, chatbot_conv_id, user_message, general_answer, background_tasks)
             general_response = ChatAskResponse(
                 intent=decision.intent,
                 message=user_message,
@@ -380,7 +378,7 @@ class ChatbotService:
                 decision.clarification_question,
                 False,
             )
-            self._save_chat_logs(requester_uid, chatbot_conv_id, user_message, casual_answer)
+            await self._save_chat_logs(requester_uid, chatbot_conv_id, user_message, casual_answer, background_tasks)
             casual_response = ChatAskResponse(
                 intent=intent,
                 message=user_message,
@@ -471,7 +469,7 @@ class ChatbotService:
         )
         timings["total"] = perf_counter() - total_start
         self._log_stage_timings(timings)
-        self._save_chat_logs(requester_uid, chatbot_conv_id, user_message, answer)
+        await self._save_chat_logs(requester_uid, chatbot_conv_id, user_message, answer, background_tasks)
         return ResponseSchema(data=ChatAskStringResponse(payload=response.model_dump_json()))
 
     async def _hydrate_context_from_text(
@@ -1568,18 +1566,21 @@ class ChatbotService:
 
         # Dùng cùng payload chuẩn để tận dụng logic personal ranking đã có sẵn.
         payload = DiscoverRequest(
-            language=context.language,
             address=context.address or "Việt Nam",
             gps=context.gps,
             ref_id=context.ref_id,
             check_in=check_in,
             check_out=check_out,
-            min_price=min(context.min_price, context.max_price),
-            max_price=max(context.min_price, context.max_price),
             children=safe_children,
             adults=context.adults,
             personality=context.personality,
             trip_style=context.trip_style,
+            trip_criteria=TripSearchCriteria(
+                budget_min=context.min_price,
+                budget_max=context.max_price,
+                trip_style=context.trip_style,
+                party_size=(context.adults or 0) + len(context.children or []),
+            ),
             max_ranked_hotels=max(1, min(context.max_ranked_hotels * 2, 20)),
         )
 
