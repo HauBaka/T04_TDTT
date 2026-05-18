@@ -493,8 +493,8 @@ class HotelRankingService:
         for collection in collections:
             collection_tokens = self._collection_tokens(collection)
             exact_match = any(
-                self._normalize_token(getattr(place, "place_id", "")) == signal.identity
-                for place in collection.places
+                self._normalize_token(pid) == signal.identity
+                for pid in (collection.place_ids or [])
             )
             if exact_match:
                 scores.append(1.0)
@@ -664,8 +664,7 @@ class HotelRankingService:
         tokens = set(self._tokenize(collection.name))
         tokens.update(self._tokenize(collection.description or "", use_model_tokens=True))
         tokens.update(self._tokenize(" ".join(collection.tags)))
-        for place in collection.places:
-            place_id = getattr(place, "place_id", "")
+        for place_id in (collection.place_ids or []):
             if place_id:
                 tokens.update(self._tokenize(place_id))
         return tokens
@@ -890,9 +889,8 @@ class HotelRankingService:
                 parts.append(f"mo_ta_bo_suu_tap: {collection.description}")
             if collection.tags:
                 parts.append(f"tag: {'; '.join(collection.tags)}")
-            if collection.places:
-                place_ids = [getattr(place, "place_id", "") for place in collection.places]
-                place_ids = [place_id for place_id in place_ids if place_id]
+            if collection.place_ids:
+                place_ids = [pid for pid in collection.place_ids if pid]
                 if place_ids:
                     parts.append(f"dia_diem_da_luu: {'; '.join(place_ids)}")
         return " | ".join(parts)
@@ -965,7 +963,7 @@ class HotelRankingService:
                 if not private_user:
                     private_user = {}
 
-                profile_data = private_user.get("travel_profile")
+                profile_data = getattr(private_user, "travel_profile", None)
                 if isinstance(profile_data, UserTravelPreference):
                     profile = profile_data
                 elif isinstance(profile_data, dict):
@@ -974,7 +972,7 @@ class HotelRankingService:
                     except Exception:
                         profile = UserTravelPreference()
 
-                collection_data = private_user.get("collections", [])
+                collection_data = getattr(private_user, "collections", [])
                 if isinstance(collection_data, list):
                     parsed_collections: list[CollectionDocument] = []
                     for item in collection_data:
@@ -987,7 +985,7 @@ class HotelRankingService:
                                 continue
                     collections = parsed_collections[:50]
 
-                history_data = private_user.get("user_behavior_history", [])
+                history_data = getattr(private_user, "user_behavior_history", [])
                 if isinstance(history_data, list):
                     parsed_history: list[UserBehaviorEvent] = []
                     for event in history_data:
@@ -1000,7 +998,7 @@ class HotelRankingService:
                                 continue
                     history = parsed_history[:100]
 
-                weight_data = private_user.get("scoring_weights")
+                weight_data = getattr(private_user, "scoring_weights", None)
                 if isinstance(weight_data, ScoringWeights):
                     scoring_weights = weight_data
                 elif isinstance(weight_data, dict):

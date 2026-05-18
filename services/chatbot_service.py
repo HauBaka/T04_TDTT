@@ -1578,7 +1578,7 @@ class ChatbotService:
                         check_in_date=check_in.strftime("%Y-%m-%d"),
                         check_out_date=check_out.strftime("%Y-%m-%d"),
                         adults=context.adults or 2,
-                        children=len(context.children) if context.children else 0,
+                        children=context.children,
                     )
                     if serp_result and serp_result.data:
                         final_pool = serp_result.data
