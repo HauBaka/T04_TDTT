@@ -2,7 +2,7 @@ import asyncio
 
 from google.cloud import firestore as fs
 from google.cloud.firestore_v1.base_query import FieldFilter
-from schemas.user_preference_schema import UserTravelPreference
+from schemas.user_preference_schema import UserTravelPreference, UserTravelPreferenceUpdateRequest
 from loguru import logger
 from pydantic import ValidationError as PydanticValidationError
 
@@ -99,22 +99,28 @@ class UserRepository(BaseRepository):
         # NOTE: Để service xử lý exceptions
         await self._update(uid, update_data)
     
-    async def get_travel_preference(self, uid: str) -> UserTravelPreference | None:
+    async def get_travel_preference(self, uid: str) -> UserTravelPreference:
         """Lấy travel_profile field từ document user."""
-        user_dict = await self._get_by_id(uid)
-        if not user_dict:
-            return None
+        user_doc = await self.get_user(uid)
+        preference = user_doc.travel_profile
 
-        preference_dict = user_dict.get("travel_profile")
-        if preference_dict is None:
-            return None
+        if preference is None:
+            raise NotFoundError("Travel preference not found")
 
-        return UserTravelPreference.model_validate(preference_dict)
+        if isinstance(preference, UserTravelPreference):
+            return preference
+
+        return UserTravelPreference.model_validate(preference)
     
-    async def update_travel_preference(self, uid: str, preference: UserTravelPreference) -> UserTravelPreference:
+    async def update_travel_preference(self, uid: str, preference: UserTravelPreferenceUpdateRequest) -> UserTravelPreference:
         """Ghi hoặc cập nhật travel_profile cho user."""
-        await self._update(uid, {"travel_profile": preference.model_dump()})
-        return preference
+        payload = preference.model_dump(exclude_none=True)
+
+        if not payload:
+            raise ValidationError("Travel preference payload cannot be empty")
+
+        await self._update(uid, {"travel_profile": payload})
+        return UserTravelPreference.model_validate(payload)
     
     async def delete_travel_preference(self, uid: str) -> bool:
         """Xóa travel_profile của user."""

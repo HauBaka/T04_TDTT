@@ -50,7 +50,7 @@ class ScoringWeights(BaseModel):
     weather_fit: float = 0.10
 
 
-class UserTravelPreferenceRequest(BaseModel):
+class UserTravelPreferenceUpdateRequest(BaseModel):
     """Schema dùng cho request tạo / cập nhật preference (tất cả trường optional để dễ partial update)."""
     weather_tolerance: WeatherTolerance | None = None
     preferred_amenities: list[str] | None = None
@@ -61,12 +61,12 @@ class UserTravelPreferenceRequest(BaseModel):
     notes: str | None = None
 
 
-class UserTravelPreferenceUpdateRequest(UserTravelPreferenceRequest):
-    """Schema đồng bộ cho endpoint update preference.
+# class UserTravelPreferenceUpdateRequest(UserTravelPreferenceRequest):
+#     """Schema đồng bộ cho endpoint update preference.
 
-    Tách riêng để API không nhận trực tiếp model lưu trữ.
-    """
-    pass
+#     Tách riêng để API không nhận trực tiếp model lưu trữ.
+#     """
+#     pass
 
 
 class TravelPreferenceOption(BaseModel):

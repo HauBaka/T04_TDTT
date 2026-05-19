@@ -35,8 +35,9 @@ class UserDocument(BaseModel):
     last_updated: datetime | None = None
     # Các trường thông tin cá nhân khác có thể thêm vào đây
     
-    collections: list[CollectionPublicResponse] = Field(default_factory=list)
-    user_behavior_history: list[UserBehaviorEvent] = Field(default_factory=list)
+    # collections: list[CollectionPublicResponse] = Field(default_factory=list)
+    # user_behavior_history: list[UserBehaviorEvent] = Field(default_factory=list)
+    
     # Trip hiện tại mà user đang tham gia
     current_trip: str | None = None
     # TODO: Lưu vào collection "user_preference" để dễ quản lý hơn
