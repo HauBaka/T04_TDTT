@@ -6,6 +6,8 @@ from schemas.discover_schema import (
     AddressSuggestionResponse,
     DiscoverHotel,
     DiscoverRequest,
+    HotelSuggestionRequest,
+    DiscoverResponse,
 )
 from schemas.response_schema import GPSCoordinates, ResponseSchema
 from services.discover_service import DiscoverService
@@ -13,7 +15,7 @@ from services.discover_service import DiscoverService
 discover_router = APIRouter()
 
 
-@discover_router.post("/discover", response_model=ResponseSchema)
+@discover_router.post("/discover", response_model=ResponseSchema[DiscoverResponse])
 async def perform(payload: DiscoverRequest):
     """Tìm lodgings"""
     try:
@@ -31,6 +33,14 @@ async def perform(payload: DiscoverRequest):
 async def suggest_address(query: AddressSuggestionRequest):
     """Đề xuất địa chỉ dựa trên truy vấn đầu vào."""
     return await DiscoverService.suggest_addresses(query)
+
+
+@discover_router.post(
+    "/discover/hotels", response_model=ResponseSchema[list[DiscoverHotel]]
+)
+async def search_hotels(payload: HotelSuggestionRequest):
+    """Tìm kiếm khách sạn dựa trên tên và vị trí (nếu có)"""
+    return await DiscoverService.search_hotels(name=payload.name, gps=payload.gps)
 
 
 @discover_router.get(

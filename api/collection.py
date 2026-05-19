@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends
 
 from core.dependencies import get_current_user
 from schemas.collection_schema import (
@@ -66,11 +66,13 @@ async def update_collection(
     "/collections/{collection_id}", response_model=ResponseSchema[bool]
 )
 async def delete_collection(
-    collection_id: str, requester=Depends(get_current_user(optional=False))
+    collection_id: str,
+    background_tasks: BackgroundTasks,
+    requester=Depends(get_current_user(optional=False)),
 ):
     """Xóa một collection cụ thể."""
     return await collection_service.delete_collection(
-        collection_id, requester.get("uid")
+        collection_id, requester.get("uid"), background_tasks=background_tasks
     )
 
 
@@ -84,11 +86,15 @@ async def delete_collection(
 async def add_places_to_collection(
     collection_id: str,
     places_request: AddMultiplePlacesRequest,
+    background_tasks: BackgroundTasks,
     requester=Depends(get_current_user(optional=False)),
 ):
     """Thêm nhiều địa điểm vào một collection cụ thể."""
     return await collection_service.add_places_to_collection(
-        collection_id, requester.get("uid"), places_request.place_ids
+        collection_id,
+        requester.get("uid"),
+        places_request.place_ids,
+        background_tasks=background_tasks,
     )
 
 
@@ -112,11 +118,15 @@ async def get_places_from_collection(
 async def remove_places_from_collection(
     collection_id: str,
     places_request: RemoveMultiplePlacesRequest,
+    background_tasks: BackgroundTasks,
     requester=Depends(get_current_user(optional=False)),
 ):
     """Xóa nhiều địa điểm khỏi một collection cụ thể."""
     return await collection_service.remove_places_from_collection(
-        collection_id, requester.get("uid"), places_request.place_ids
+        collection_id,
+        requester.get("uid"),
+        places_request.place_ids,
+        background_tasks=background_tasks,
     )
 
 

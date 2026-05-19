@@ -108,6 +108,10 @@ class CollectionSaverResponse(UserPreviewResponse):
     saved_at: datetime
 
 
+class CollectionOwnerResponse(UserPreviewResponse):
+    pass
+
+
 class CollectionPlaceResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -146,7 +150,7 @@ class CollectionPlaceResponse(BaseModel):
 
 class CollectionPublicResponse(BaseModel):
     id: str
-    owner_uid: str
+    owner: CollectionOwnerResponse
 
     name: str = Field(..., min_length=3, max_length=32)
     description: str | None = Field(None, max_length=512)

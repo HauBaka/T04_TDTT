@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
+from fastapi import BackgroundTasks
 from google.cloud import firestore as fs
 
 from core.exceptions import (
@@ -8,7 +9,6 @@ from core.exceptions import (
     NotFoundError,
     PermissionDeniedError,
 )
-from services.notification_service import notification_service
 from repositories.collection_repo import collection_repo
 from repositories.hotel_repo import hotel_repo
 from repositories.user_repo import user_repo
@@ -16,6 +16,7 @@ from schemas.collection_schema import (
     CollectionContributorResponse,
     CollectionCreateRequest,
     CollectionDocument,
+    CollectionOwnerResponse,
     CollectionPlaceResponse,
     CollectionPublicResponse,
     CollectionResponse,
@@ -30,7 +31,10 @@ from schemas.invitation_schema import (
 )
 from schemas.notification_schema import NotificationCreateRequest, NotificationType
 from schemas.response_schema import ResponseSchema
+from schemas.user_behavior_schema import UserBehaviorEventCreateRequest, UserEventType
 from schemas.view_schema import ViewResponse
+from services.behavior_service import behavior_service
+from services.notification_service import notification_service
 
 
 class CollectionService:
@@ -102,6 +106,7 @@ class CollectionService:
         collection_id: str,
         requester_id: str,
         place_ids: list[str],
+        background_tasks: BackgroundTasks,
     ) -> ResponseSchema[CollectionResponse]:
         """Thêm nhiều địa điểm vào một collection."""
         # Check collection có tồn tại không
@@ -135,6 +140,21 @@ class CollectionService:
             collection_id, valid_ids, requester_id
         )
 
+        background_tasks.add_task(
+            behavior_service.record_event,
+            requester_id,
+            UserBehaviorEventCreateRequest(
+                event_type=UserEventType.SAVE_PLACE,
+                target_id=collection_id,
+                target_name=updated_collection.name,
+                metadata={
+                    "target_type": "collection",
+                    "place_count": str(len(valid_ids)),
+                },
+                source="collection_service",
+            ),
+        )
+
         return await self.build_response(updated_collection)
 
     async def get_places_from_collection(
@@ -161,6 +181,7 @@ class CollectionService:
         collection_id: str,
         requester_id: str,
         place_ids: list[str],
+        background_tasks: BackgroundTasks,
     ) -> ResponseSchema[CollectionResponse]:
         """Xóa nhiều địa điểm khỏi một collection."""
         # Check collection có tồn tại không
@@ -191,6 +212,21 @@ class CollectionService:
             collection_id, valid_ids
         )
 
+        background_tasks.add_task(
+            behavior_service.record_event,
+            requester_id,
+            UserBehaviorEventCreateRequest(
+                event_type=UserEventType.REMOVE_PLACE,
+                target_id=collection_id,
+                target_name=updated_collection.name,
+                metadata={
+                    "target_type": "collection",
+                    "place_count": str(len(valid_ids)),
+                },
+                source="collection_service",
+            ),
+        )
+
         return await self.build_response(updated_collection)
 
     async def send_invitations(
@@ -210,14 +246,10 @@ class CollectionService:
         if target_uids:
             existing_users = await user_repo.get_users(target_uids)
             existing_uids = set(existing_users.keys())
-            not_found_uids = [
-                uid for uid in target_uids if uid not in existing_uids
-                ]
+            not_found_uids = [uid for uid in target_uids if uid not in existing_uids]
             if not_found_uids:
-                raise NotFoundError(
-                    f"Invalid target UIDs: {', '.join(not_found_uids)}"
-                )
-            
+                raise NotFoundError(f"Invalid target UIDs: {', '.join(not_found_uids)}")
+
         existing_uids = collection.contributor_uids
 
         new_uids = [uid for uid in target_uids if uid not in existing_uids]
@@ -229,15 +261,18 @@ class CollectionService:
         from services.invitation_service import invitation_service
 
         expired_at = self.collection_repo._current_timestamp + timedelta(days=7)
-        invitation = await invitation_service.send_batch_invitations([
-            InvitationCreateRequest(
-                sender_uid=requester_uid,
-                target_uid=uid,
-                type=InvitationType.COLLECTION,
-                ref_id=collection_id,
-                expired_at=expired_at
-            ) for uid in new_uids
-        ])
+        invitation = await invitation_service.send_batch_invitations(
+            [
+                InvitationCreateRequest(
+                    sender_uid=requester_uid,
+                    target_uid=uid,
+                    type=InvitationType.COLLECTION,
+                    ref_id=collection_id,
+                    expired_at=expired_at,
+                )
+                for uid in new_uids
+            ]
+        )
 
         return ResponseSchema(data=invitation)
 
@@ -245,7 +280,11 @@ class CollectionService:
         self, collection_id: str, requester_id: str, contributor_uids: list[str]
     ) -> ResponseSchema[CollectionResponse]:
         """Thêm nhiều cộng tác viên vào một collection."""
-        await self.send_invitations(collection_id=collection_id, requester_uid=requester_id, target_uids=contributor_uids)
+        await self.send_invitations(
+            collection_id=collection_id,
+            requester_uid=requester_id,
+            target_uids=contributor_uids,
+        )
         # Check collection có tồn tại không
         collection = await collection_repo.get_collection(collection_id)
 
@@ -282,18 +321,24 @@ class CollectionService:
         # updated_collection = await collection_repo.add_contributors_to_collection(collection_id, contributor_uids)
 
         return await self.build_response(collection)
-    
-    async def add_accepted_contributor(self, collection_id: str, contributor_uid: str) -> ResponseSchema[CollectionResponse]:
+
+    async def add_accepted_contributor(
+        self, collection_id: str, contributor_uid: str
+    ) -> ResponseSchema[CollectionResponse]:
         """Thêm những cộng tác viên đã chấp nhận lời mời vào một collection."""
         collection = await collection_repo.get_collection(collection_id)
 
         if contributor_uid in collection.contributor_uids:
-            raise BadRequestError(message="You are already a contributor of this collection.")
-        
-        updated_collection = await collection_repo.add_contributors_to_collection(collection_id, [contributor_uid])
+            raise BadRequestError(
+                message="You are already a contributor of this collection."
+            )
+
+        updated_collection = await collection_repo.add_contributors_to_collection(
+            collection_id, [contributor_uid]
+        )
 
         return await self.build_response(updated_collection)
-    
+
     async def get_contributors_from_collection(
         self, collection_id: str, requester_id: str | None
     ) -> ResponseSchema[list[CollectionContributorResponse]]:
@@ -321,7 +366,9 @@ class CollectionService:
         collection = await collection_repo.get_collection(collection_id)
 
         # Check quyền - chỉ owner mới có thể xóa contributors hoặc contributor có thể tự xóa mình
-        if requester_id != collection.owner_uid and not (len(contributor_uids) == 1 and contributor_uids[0] == requester_id):
+        if requester_id != collection.owner_uid and not (
+            len(contributor_uids) == 1 and contributor_uids[0] == requester_id
+        ):
             raise PermissionDeniedError(
                 message="You do not have permission to remove contributors from this collection."
             )
@@ -350,7 +397,7 @@ class CollectionService:
                 type=NotificationType.SYSTEM,
                 content=f"You have been removed from the collection '{collection.name}'.",
                 ref_id=collection_id,
-                actor_id=requester_id
+                actor_id=requester_id,
             )
             for uid in valid_uids
         ]
@@ -409,7 +456,7 @@ class CollectionService:
         return await self.build_response(updated_collection)
 
     async def delete_collection(
-        self, collection_id: str, requester_id: str
+        self, collection_id: str, requester_id: str, background_tasks: BackgroundTasks
     ) -> ResponseSchema[bool]:
         """Xóa một collection."""
         collection = await collection_repo.get_collection(collection_id)
@@ -427,17 +474,37 @@ class CollectionService:
                 message="Cannot delete the default 'liked' collection."
             )
 
-        return ResponseSchema(
-            data=await collection_repo.delete_collection(collection_id)
-        )
+        deleted = await collection_repo.delete_collection(collection_id)
+        if deleted:
+            background_tasks.add_task(
+                behavior_service.record_event,
+                requester_id,
+                UserBehaviorEventCreateRequest(
+                    event_type=UserEventType.REMOVE_COLLECTION,
+                    target_id=collection.id,
+                    target_name=collection.name,
+                    metadata={"action": "delete_collection"},
+                    source="collection_service",
+                ),
+            )
+
+        return ResponseSchema(data=deleted)
 
     async def build_response(
         self, collection_data: CollectionDocument
     ) -> ResponseSchema[CollectionResponse]:
         """Xây dựng response cho collection."""
+        owner_doc = await user_repo.get_user(collection_data.owner_uid)
+
+        owner_response = CollectionOwnerResponse(
+            uid=owner_doc.uid,
+            username=owner_doc.username,
+            display_name=owner_doc.display_name,
+            avatar_url=owner_doc.avatar_url,
+        )
         collection = CollectionPublicResponse(
             id=collection_data.id,
-            owner_uid=collection_data.owner_uid,
+            owner=owner_response,
             name=collection_data.name,
             description=collection_data.description,
             thumbnail_url=collection_data.thumbnail_url,
@@ -493,7 +560,7 @@ class CollectionService:
         return ResponseSchema(data=True)
 
     async def save_collection(
-        self, collection_id: str, requester_id: str
+        self, collection_id: str, requester_id: str, background_tasks: BackgroundTasks
     ) -> ResponseSchema[bool]:
         """Lưu một collection vào danh sách đã lưu của người dùng."""
         # Check collection tồn tại
@@ -530,10 +597,23 @@ class CollectionService:
         )
 
         await batch.commit()
+
+        background_tasks.add_task(
+            behavior_service.record_event,
+            requester_id,
+            UserBehaviorEventCreateRequest(
+                event_type=UserEventType.SAVE_COLLECTION,
+                target_id=collection.id,
+                target_name=collection.name,
+                metadata={"target_type": "collection"},
+                source="collection_service",
+            ),
+        )
+
         return ResponseSchema(data=True)
 
     async def unsave_collection(
-        self, collection_id: str, requester_id: str
+        self, collection_id: str, requester_id: str, background_tasks: BackgroundTasks
     ) -> ResponseSchema[bool]:
         """Bỏ lưu một collection khỏi danh sách đã lưu của người dùng."""
         # Check collection tồn tại
@@ -570,6 +650,19 @@ class CollectionService:
         )
 
         await batch.commit()
+
+        background_tasks.add_task(
+            behavior_service.record_event,
+            requester_id,
+            UserBehaviorEventCreateRequest(
+                event_type=UserEventType.REMOVE_COLLECTION,
+                target_id=collection.id,
+                target_name=collection.name,
+                metadata={"target_type": "collection"},
+                source="collection_service",
+            ),
+        )
+
         return ResponseSchema(data=True)
 
     async def get_savers_from_collection(

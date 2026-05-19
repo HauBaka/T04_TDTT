@@ -7,7 +7,7 @@ from externals.Gemini import gemini_client
 from externals.OllamaSummary import ollama_client
 from services.hotel_ranking_service import hotel_ranking_service
 from services.weather_service import weather_service
-from schemas.discover_schema import AnalyzedReview, DiscoverHotel, NearbyPlace, AIReviewSummary, WeatherInfo
+from schemas.discover_schema import DiscoverHotel, NearbyPlace, AIReviewSummary, WeatherInfo, UserReview
 import textwrap
 logger = logging.getLogger(__name__)
 SUMMARY_CACHE_EXPIRATION_DAYS = 14 
@@ -19,7 +19,7 @@ class SummaryService:
 
     async def generate_places_summary(
                 self, 
-                analyzed_reviews: list[AnalyzedReview], 
+                user_reviews: list[UserReview], 
                 hotel_name: str,
                 amenities: list[str] = [],
                 nearby_places: list[NearbyPlace] = [],
@@ -31,7 +31,7 @@ class SummaryService:
         """
         # Lọc & Sắp xếp Reviews (Retrieval)
         # Chỉ lấy review có độ tin cậy > 0.5
-        valid_reviews = [rev for rev in analyzed_reviews if rev.trust_weight > 0.5]
+        valid_reviews = [rev for rev in user_reviews if (rev.trust_weight or 0.0) > 0.5]
         
         # Sắp xếp theo Trust Weight giảm dần (Lấy những review uy tín nhất lên đầu)
         valid_reviews.sort(key=lambda x: x.trust_weight, reverse=True)
@@ -165,7 +165,7 @@ class SummaryService:
         for place in filtered_places:
             # Lấy dữ liệu cần thiết để gọi AI Summary
             sentiment_meta = place.ai_sentiment
-            user_reviews = sentiment_meta.analyzed_reviews if sentiment_meta else []
+            user_reviews = place.user_reviews
             amenities = place.amenities
             nearby_places = place.nearby_places
             
@@ -185,7 +185,7 @@ class SummaryService:
             # Chuẩn bị luồng gọi AI nếu cần thiết
             # Tạo coroutine cho việc gọi AI Summary, nhưng chưa chạy ngay mà sẽ chạy cùng lúc ở bước sau để tối ưu hiệu suất
             task = self.generate_places_summary(
-                analyzed_reviews=user_reviews,
+                user_reviews=user_reviews,
                 hotel_name=hotel_name,
                 amenities=amenities,
                 nearby_places=nearby_places,
@@ -214,10 +214,9 @@ class SummaryService:
                     )
                     # Đặt ngày hết hạn là thời điểm hiện tại (now) để lần tìm kiếm sau nó tự động gọi lại AI thay vì bị kẹt 14 ngày
                     place.ai_summary.ai_summary_expiration_date = now
-                    continue
-
-                # Cập nhật kết quả AI vào Place
-                place.ai_summary = summary
-                place.ai_summary.ai_summary_expiration_date = new_expiration_date
+                elif isinstance(summary, AIReviewSummary):
+                    # Cập nhật kết quả AI vào Place
+                    place.ai_summary = summary
+                    place.ai_summary.ai_summary_expiration_date = new_expiration_date
 
 summary_service = SummaryService()

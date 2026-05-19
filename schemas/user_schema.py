@@ -1,4 +1,5 @@
 from datetime import datetime
+from schemas.collection_schema import CollectionPublicResponse
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -35,7 +36,6 @@ class UserDocument(BaseModel):
     last_updated: datetime | None = None
     # Trip hiện tại mà user đang tham gia
     current_trip: str | None = None
-    # TODO: Lưu vào collection "user_preference" để dễ quản lý hơn
     travel_profile: UserTravelPreference | None = None
     scoring_weights: ScoringWeights | None = None
 
@@ -71,7 +71,7 @@ class UserCreateRequest(BaseModel):
 # Không cần chỉnh bật/tắt field vì phức tạp quá
 class UserPublicResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-
+    uid: str
     username: str
 
     display_name: str

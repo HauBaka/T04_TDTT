@@ -1,5 +1,18 @@
 import asyncio
+from typing import cast
 
+from fastapi import BackgroundTasks
+from core.exceptions import BadRequestError, ConflictError, NotFoundError, ValidationError
+from repositories.conversation_repo import conversation_repo
+from repositories.user_repo import user_repo
+from repositories.collection_repo import collection_repo
+from schemas.conversation_schema import ConversationResponse
+from schemas.user_schema import UserCollectionsResponse, UserPublicResponse, UserPrivateResponse, UserSaveCollectionRequest, UserUpdateRequest
+from schemas.collection_schema import CollectionPrivateResponse, CollectionPublicResponse
+from schemas.user_behavior_schema import UserBehaviorEventCreateRequest, UserEventType
+from schemas.view_schema import ViewResponse
+from schemas.response_schema import ResponseSchema
+from services.behavior_service import behavior_service
 from loguru import logger
 from pydantic import ValidationError as PydanticValidationError
 
@@ -13,12 +26,14 @@ from repositories.collection_repo import collection_repo
 from repositories.conversation_repo import conversation_repo
 from repositories.user_repo import user_repo
 from schemas.collection_schema import (
+    CollectionDocument,
+    CollectionOwnerResponse,
     CollectionPlaceResponse,
     CollectionPrivateResponse,
     CollectionPublicResponse,
 )
 from schemas.conversation_schema import ConversationResponse
-from schemas.response_schema import ResponseSchema
+from schemas.response_schema import ResponseSchema, UserPreviewResponse
 from schemas.user_schema import (
     UserPrivateResponse,
     UserPublicResponse,
@@ -135,27 +150,15 @@ class UserService:
             col for col in owned_collections if col.id != user_doc.liked_collection
         ]
 
-        def to_private(doc) -> CollectionPrivateResponse:
-            return CollectionPrivateResponse(
-                id=doc.id,
-                owner_uid=doc.owner_uid,
-                name=doc.name,
-                description=doc.description,
-                thumbnail_url=doc.thumbnail_url,
-                created_at=doc.created_at,
-                updated_at=doc.updated_at,
-                saved_count=doc.saved_count,
-                contributor_count=doc.contributor_count,
-                place_count=doc.place_count,
-                views=doc.views or ViewResponse(),
-                tags=doc.tags,
-                visibility=doc.visibility,
-            )
+        data = cast(
+            list[CollectionPrivateResponse],
+            await self._build_collections_response(return_collections, private=True),
+        )
 
         return ResponseSchema(
             status_code=200,
             message="Collections retrieved successfully",
-            data=[to_private(doc) for doc in return_collections],
+            data=data,
         )
 
     async def get_contributing_collections(
@@ -165,27 +168,17 @@ class UserService:
             await collection_repo.get_contributed_collections(requester_uid) or []
         )
 
-        def to_private(doc) -> CollectionPrivateResponse:
-            return CollectionPrivateResponse(
-                id=doc.id,
-                owner_uid=doc.owner_uid,
-                name=doc.name,
-                description=doc.description,
-                thumbnail_url=doc.thumbnail_url,
-                created_at=doc.created_at,
-                updated_at=doc.updated_at,
-                saved_count=doc.saved_count,
-                contributor_count=doc.contributor_count,
-                place_count=doc.place_count,
-                views=doc.views or ViewResponse(),
-                tags=doc.tags,
-                visibility=doc.visibility,
-            )
+        data = cast(
+            list[CollectionPrivateResponse],
+            await self._build_collections_response(
+                contributing_collections, private=True
+            ),
+        )
 
         return ResponseSchema(
             status_code=200,
             message="Collections retrieved successfully",
-            data=[to_private(doc) for doc in contributing_collections],
+            data=data,
         )
 
     async def get_saved_collections(
@@ -194,11 +187,42 @@ class UserService:
         saved_collections = (
             await collection_repo.get_saved_collections(requester_uid) or []
         )
+        data = await self._build_collections_response(saved_collections)
+
+        return ResponseSchema(
+            status_code=200,
+            message="Collections retrieved successfully",
+            data=data,
+        )
+
+    async def _build_collections_response(
+        self, collections: list[CollectionDocument], private: bool = False
+    ) -> list[CollectionPublicResponse | CollectionPrivateResponse]:
+
+        owner_uids = list({col.owner_uid for col in collections})
+
+        owner_docs = await user_repo.get_users(owner_uids) if owner_uids else {}
+
+        owner_responses = {
+            uid: CollectionOwnerResponse(
+                uid=doc.uid,
+                username=doc.username,
+                display_name=doc.display_name,
+                avatar_url=doc.avatar_url,
+            )
+            for uid, doc in owner_docs.items()
+        }
+        empty_owner_response = CollectionOwnerResponse(
+            uid="",
+            username="",
+            display_name="Unknown",
+            avatar_url="",
+        )
 
         def to_public(doc) -> CollectionPublicResponse:
             return CollectionPublicResponse(
                 id=doc.id,
-                owner_uid=doc.owner_uid,
+                owner=owner_responses.get(doc.owner_uid, empty_owner_response),
                 name=doc.name,
                 description=doc.description,
                 thumbnail_url=doc.thumbnail_url,
@@ -212,14 +236,30 @@ class UserService:
                 visibility=doc.visibility,
             )
 
-        return ResponseSchema(
-            status_code=200,
-            message="Collections retrieved successfully",
-            data=[to_public(doc) for doc in saved_collections],
-        )
+        def to_private(doc) -> CollectionPrivateResponse:
+            return CollectionPrivateResponse(
+                id=doc.id,
+                owner=owner_responses.get(doc.owner_uid, empty_owner_response),
+                name=doc.name,
+                description=doc.description,
+                thumbnail_url=doc.thumbnail_url,
+                created_at=doc.created_at,
+                updated_at=doc.updated_at,
+                saved_count=doc.saved_count,
+                contributor_count=doc.contributor_count,
+                place_count=doc.place_count,
+                views=doc.views or ViewResponse(),
+                tags=doc.tags,
+                visibility=doc.visibility,
+            )
+
+        if private:
+            return [to_private(doc) for doc in collections]
+        else:
+            return [to_public(doc) for doc in collections]
 
     async def save_collection(
-        self, requester_uid: str, collection: UserSaveCollectionRequest
+        self, requester_uid: str, collection: UserSaveCollectionRequest,background_tasks: BackgroundTasks
     ) -> ResponseSchema[bool]:
         # Check collection exists
         collection_doc = await collection_repo.get_collection(collection.collection_id)
@@ -238,13 +278,21 @@ class UserService:
             collection_repo.add_saver(collection.collection_id, requester_uid),
         )
 
-        return ResponseSchema(
-            status_code=200, message="Collection saved successfully", data=True
+        background_tasks.add_task(
+            behavior_service.record_event,
+            requester_uid,
+            UserBehaviorEventCreateRequest(
+                event_type=UserEventType.SAVE_COLLECTION,
+                target_id=collection_doc.id,
+                target_name=collection_doc.name,
+                metadata={"target_type": "collection"},
+                source="user_service",
+            ),
         )
 
-    async def unsave_collection(
-        self, requester_uid: str, collection_id: str
-    ) -> ResponseSchema[bool]:
+        return ResponseSchema(status_code=200, message="Collection saved successfully", data=True)
+
+    async def unsave_collection(self, requester_uid: str, collection_id: str, background_tasks: BackgroundTasks) -> ResponseSchema[bool]:
         # Check collection exists
         collection_doc = await collection_repo.get_collection(collection_id)
         user_doc = await self.user_repo.get_user(requester_uid)
@@ -258,18 +306,28 @@ class UserService:
             collection_repo.remove_saver(collection_id, requester_uid),
         )
 
-        return ResponseSchema(
-            status_code=200, message="Collection unsaved successfully", data=True
+        background_tasks.add_task(
+            behavior_service.record_event,
+            requester_uid,
+            UserBehaviorEventCreateRequest(
+                event_type=UserEventType.REMOVE_COLLECTION,
+                target_id=collection_doc.id,
+                target_name=collection_doc.name,
+                metadata={"target_type": "collection"},
+                source="user_service",
+            ),
         )
 
+        return ResponseSchema(status_code=200, message="Collection unsaved successfully", data=True)
+
     async def add_favourite_place(
-        self, requester_uid: str, place_id: str
+        self, requester_uid: str, place_id: str,background_tasks: BackgroundTasks
     ) -> ResponseSchema[bool]:
         user_doc = await self.user_repo.get_user(requester_uid)
 
         try:
             await collection_service.add_places_to_collection(
-                user_doc.liked_collection, requester_uid, [place_id]
+                user_doc.liked_collection, requester_uid, [place_id], background_tasks
             )
             return ResponseSchema(
                 status_code=200,
@@ -284,13 +342,13 @@ class UserService:
             )
 
     async def remove_favourite_place(
-        self, requester_uid: str, place_id: str
+        self, requester_uid: str, place_id: str,background_tasks: BackgroundTasks
     ) -> ResponseSchema[bool]:
         user_doc = await self.user_repo.get_user(requester_uid)
 
         try:
             await collection_service.remove_places_from_collection(
-                user_doc.liked_collection, requester_uid, [place_id]
+                user_doc.liked_collection, requester_uid, [place_id],background_tasks
             )
             return ResponseSchema(
                 status_code=200,
@@ -362,6 +420,25 @@ class UserService:
             status_code=200,
             message="Conversations retrieved successfully",
             data=conversations,
+        )
+
+    async def suggest_users(
+        self, query: str
+    ) -> ResponseSchema[list[UserPreviewResponse]]:
+        suggested_users = await self.user_repo.suggest_users(query)
+
+        def to_preview(user_doc) -> UserPreviewResponse:
+            return UserPreviewResponse(
+                uid=user_doc.uid,
+                username=user_doc.username,
+                display_name=user_doc.display_name,
+                avatar_url=user_doc.avatar_url,
+            )
+
+        return ResponseSchema(
+            status_code=200,
+            message="User suggestions retrieved successfully",
+            data=[to_preview(doc) for doc in suggested_users],
         )
 
 
