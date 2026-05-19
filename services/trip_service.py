@@ -1,9 +1,11 @@
 
+from datetime import datetime, timedelta, timezone
+
 from loguru import logger
 
 from core.exceptions import AppException, BadRequestError, NotFoundError, PermissionDeniedError
 from repositories.hotel_repo import hotel_repo
-from schemas.invitation_schema import InvitationResponse, InvitationType
+from schemas.invitation_schema import InvitationCreateRequest, InvitationResponse, InvitationType
 from schemas.response_schema import ResponseSchema
 from schemas.trip_schema import TripMemberResponse, TripCreateRequest, TripDocument, TripPlaceResponse, TripResponse, TripStatus, TripUpdateRequest
 from repositories.trip_repo import trip_repo
@@ -114,29 +116,18 @@ class TripService:
             
             member_to_add.append(uid)
 
-        invitation = await invitation_service.send_batch_invitations(
-            sender_uid=requester_uid,
-            target_uids=member_to_add,
-            invitation_type=InvitationType.TRIP,
-            ref_id=trip_id,
-            invitation_content=f"You have been invited to join the trip '{trip.name}'."
-        )
+        expired_at = self.trip_repo._current_timestamp + timedelta(days=7)
+        invitation = await invitation_service.send_batch_invitations([
+            InvitationCreateRequest(
+                sender_uid=requester_uid,
+                target_uid=uid,
+                type=InvitationType.TRIP,
+                ref_id=trip_id,
+                expired_at=expired_at
+            ) for uid in member_to_add
+        ])
 
-        return ResponseSchema[list[InvitationResponse]](
-            data=[
-                InvitationResponse(
-                    id=inv.id,
-                    sender_uid=inv.sender_uid,
-                    target_uid=inv.target_uid,
-                    type=inv.type,
-                    ref_id=inv.ref_id,
-                    status=inv.status,
-                    created_at=inv.created_at,
-                    expired_at=inv.expired_at
-                )
-                for inv in invitation
-            ]
-        )
+        return ResponseSchema(data=invitation)
 
     async def add_members_to_trip(self, trip_id: str, requester_uid: str, member_uids: list[str]) -> ResponseSchema[TripResponse]:
         """Thêm nhiều thành viên vào một trip."""
@@ -176,9 +167,23 @@ class TripService:
         
         return await self._build_trip_response(trip)
     
-    async def add_accepted_members(self, trip_id: str, member_uids: list[str]) -> ResponseSchema[TripResponse]:
-        """Thêm những thành viên đã chấp nhận lời mời vào một trip."""
-        updated_trip = await self.trip_repo.add_members(trip_id, member_uids)
+    async def add_accepted_member(self, trip_id: str, member_uid: str) -> ResponseSchema[TripResponse]:
+        """Thêm thành viên vào trip sau khi họ đã chấp nhận lời mời."""
+        trip = await self.trip_repo.get_by_id(trip_id)
+
+        if member_uid in trip.member_uids:
+            raise BadRequestError(message="You are already a member of this trip.")
+        
+        user_info = await self.user_repo.get_user(member_uid)
+        if user_info.current_trip:
+            raise BadRequestError(message=f"User {user_info.display_name} is already in another trip.")
+
+        if trip.status != TripStatus.WAITING:
+            raise BadRequestError(
+                message=f"Cannot add member. Trip is currently in '{trip.status.value}' status, expected 'waiting'."
+            )
+
+        updated_trip = await self.trip_repo.add_members(trip_id, [member_uid])
 
         return await self._build_trip_response(updated_trip)
     

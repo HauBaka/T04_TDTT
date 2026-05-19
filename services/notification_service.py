@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from core.exceptions import NotFoundError, AppException, PermissionDeniedError
+from core.exceptions import BadRequestError, NotFoundError, AppException, PermissionDeniedError
 from schemas.notification_schema import NotificationCreateRequest, NotificationDocument, NotificationResponse, NotificationType, NotificationUpdateRequest
 from schemas.response_schema import ResponseSchema
 from repositories.notification_repo import notification_repo
@@ -7,11 +7,11 @@ from repositories.notification_repo import notification_repo
 class NotificationService:
     def __init__(self):
         self.notification_repository = notification_repo
-    
-    async def create_notification(self, user_id: str, notification_request: NotificationDocument) -> ResponseSchema[NotificationResponse]:
+
+    async def create_notification(self, notification_request: NotificationCreateRequest) -> ResponseSchema[NotificationResponse]:
         """Tạo một thông báo mới."""
-        notification = await self.notification_repository.create(user_id, notification_request)
-        return await self.build_notification_response(notification)
+        notification = await self.notification_repository.create(notification_request)
+        return self.build_notification_response(notification)
 
     async def update_notification(self, notification_id: str, user_id: str, update_request: NotificationUpdateRequest) -> ResponseSchema[NotificationResponse]:
         """Cập nhật trạng thái của một thông báo cụ thể (ví dụ: đánh dấu đã đọc)."""
@@ -35,29 +35,12 @@ class NotificationService:
     async def create_batch_notifications(self, request: list[NotificationCreateRequest]) -> list[NotificationResponse]:
         """Tạo nhiều thông báo cùng lúc."""
         if not request:
-            return
+            raise BadRequestError("Request list cannot be empty.")
 
-        batch = self.notification_repository._db.batch()
-        timestamp = datetime.now(timezone.utc)
-        notifications = []
+        notifications = await self.notification_repository.create_batch(requests=request)
 
-        for req in request:
-            notification_ref = self.notification_repository._collection.document()
-            notification_doc = NotificationDocument(
-                id=notification_ref.id,
-                receiver_id=req.receiver_id,
-                send_at=timestamp,
-                type=req.type,
-                content=req.content,
-                read=False,
-                ref_id=req.ref_id,
-                actor_id=req.actor_id
-            )
-            batch.create(notification_ref, notification_doc.model_dump(mode="python", exclude_none=False))
-            notifications.append(notification_doc)
-
-        await batch.commit()
-        return notifications
+        # Convert to response objects for callers that expect NotificationResponse
+        return [self.build_notification_object(n) for n in notifications]
 
     async def delete_notification(self, notification_id: str, user_id: str) -> ResponseSchema[bool]:
         """Xóa một thông báo cụ thể."""

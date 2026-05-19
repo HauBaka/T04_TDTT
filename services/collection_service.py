@@ -24,6 +24,7 @@ from schemas.collection_schema import (
     CollectionVisibility,
 )
 from schemas.invitation_schema import (
+    InvitationCreateRequest,
     InvitationResponse,
     InvitationType,
 )
@@ -193,14 +194,14 @@ class CollectionService:
         return await self.build_response(updated_collection)
 
     async def send_invitations(
-        self, collection_id: str, requester_id: str, target_uids: list[str]
+        self, collection_id: str, requester_uid: str, target_uids: list[str]
     ) -> ResponseSchema[list[InvitationResponse]]:
         """Gửi lời mời cộng tác cho nhiều người dùng cùng lúc."""
         # Check collection có tồn tại không
         collection = await collection_repo.get_collection(collection_id)
 
         # Check quyền - chỉ owner mới có thể gửi invitation
-        if requester_id != collection.owner_uid:
+        if requester_uid != collection.owner_uid:
             raise PermissionDeniedError(
                 message="You do not have permission to send invitations for this collection."
             )
@@ -226,35 +227,25 @@ class CollectionService:
                 message="All provided users are already added to the collection."
             )
         from services.invitation_service import invitation_service
-        invitation = await invitation_service.send_batch_invitations(
-            sender_uid=requester_id,
-            target_uids=new_uids,
-            invitation_type=InvitationType.COLLECTION,
-            ref_id=collection_id,
-            invitation_content=f"You have been invited to the collection '{collection.name}'."
-        )
 
-        return ResponseSchema[list[InvitationResponse]](
-            data=[
-                InvitationResponse(
-                    id=inv.id,
-                    sender_uid=inv.sender_uid,
-                    target_uid=inv.target_uid,
-                    type=inv.type,
-                    ref_id=inv.ref_id,
-                    status=inv.status,
-                    created_at=inv.created_at,
-                    expired_at=inv.expired_at
-                )
-                for inv in invitation
-            ]
-        )
+        expired_at = self.collection_repo._current_timestamp + timedelta(days=7)
+        invitation = await invitation_service.send_batch_invitations([
+            InvitationCreateRequest(
+                sender_uid=requester_uid,
+                target_uid=uid,
+                type=InvitationType.COLLECTION,
+                ref_id=collection_id,
+                expired_at=expired_at
+            ) for uid in new_uids
+        ])
+
+        return ResponseSchema(data=invitation)
 
     async def add_contributors_to_collection(
         self, collection_id: str, requester_id: str, contributor_uids: list[str]
     ) -> ResponseSchema[CollectionResponse]:
         """Thêm nhiều cộng tác viên vào một collection."""
-        await self.send_invitations(collection_id=collection_id, requester_id=requester_id, target_uids=contributor_uids)
+        await self.send_invitations(collection_id=collection_id, requester_uid=requester_id, target_uids=contributor_uids)
         # Check collection có tồn tại không
         collection = await collection_repo.get_collection(collection_id)
 
@@ -292,9 +283,14 @@ class CollectionService:
 
         return await self.build_response(collection)
     
-    async def add_accepted_contributors(self, collection_id: str, contributor_uids: list[str]) -> ResponseSchema[CollectionResponse]:
+    async def add_accepted_contributor(self, collection_id: str, contributor_uid: str) -> ResponseSchema[CollectionResponse]:
         """Thêm những cộng tác viên đã chấp nhận lời mời vào một collection."""
-        updated_collection = await collection_repo.add_contributors_to_collection(collection_id, contributor_uids)
+        collection = await collection_repo.get_collection(collection_id)
+
+        if contributor_uid in collection.contributor_uids:
+            raise BadRequestError(message="You are already a contributor of this collection.")
+        
+        updated_collection = await collection_repo.add_contributors_to_collection(collection_id, [contributor_uid])
 
         return await self.build_response(updated_collection)
     
@@ -324,8 +320,8 @@ class CollectionService:
         # Check collection có tồn tại không
         collection = await collection_repo.get_collection(collection_id)
 
-        # Check quyền - chỉ owner mới có thể xóa contributors
-        if requester_id != collection.owner_uid:
+        # Check quyền - chỉ owner mới có thể xóa contributors hoặc contributor có thể tự xóa mình
+        if requester_id != collection.owner_uid and not (len(contributor_uids) == 1 and contributor_uids[0] == requester_id):
             raise PermissionDeniedError(
                 message="You do not have permission to remove contributors from this collection."
             )
