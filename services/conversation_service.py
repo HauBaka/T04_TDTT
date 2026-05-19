@@ -2,12 +2,11 @@ import asyncio
 from datetime import datetime, timedelta
 from fastapi import BackgroundTasks
 
-from repositories import invitation_repo
+from services.invitation_service import invitation_service
 from repositories.user_repo import user_repo
 from repositories.conversation_repo import conversation_repo
 from schemas.conversation_schema import ConversationDocument, ConversationMemberResponse, ConversationMessageDocument, ConversationMessageResponse, ConversationResponse, ConversationCreateRequest, ConversationUpdateRequest, AddMembersRequest, SendMessageRequest, ConversationRole, ConversationMemberDocument, UserConversationSummaryUpdate
-from schemas.invitation_schema import InvitationDocument, InvitationStatus, InvitationType
-from schemas.notification_schema import NotificationDocument, NotificationType
+from schemas.invitation_schema import InvitationResponse, InvitationType
 from schemas.response_schema import ResponseSchema
 from core.exceptions import AppException, BadRequestError, NotFoundError, PermissionDeniedError
 
@@ -85,30 +84,77 @@ class ConversationService:
         await self.conversation_repository.delete(conversation_id)
         return ResponseSchema(data=True)
     
-    async def add_members_to_conversation(self, conversation_id: str, requester_uid: str, request: AddMembersRequest, background_tasks: BackgroundTasks) -> ResponseSchema[ConversationResponse]:
-        """Thêm nhiều thành viên vào một conversation."""
-        """Xóa một conversation."""
+    async def send_invitations(
+            self, conversation_id: str, requester_uid: str, target_uids: list[str]
+    ) -> ResponseSchema[list[InvitationResponse]]:
         conv = await self.conversation_repository.get_by_id(conversation_id)
 
         if requester_uid not in conv.member_uids:
             raise PermissionDeniedError(message="You are not a member of this conversation")
-
-        # Lọc ra những UID đã tồn tại trong conversation để tránh lỗi khi thêm trùng lặp
+        
+        if target_uids:
+            existing_users = await user_repo.get_users(target_uids)
+            existing_uids = set(existing_users.keys())
+            not_found_uids = [uid for uid in target_uids if uid not in existing_uids]
+            if not_found_uids:
+                raise NotFoundError(message=f"Target users not found: {', '.join(not_found_uids)}")
+        
         existing_uids = set(conv.member_uids)
-        new_uids = [uid for uid in request.member_uids if uid not in existing_uids]
+
+        new_uids = [uid for uid in target_uids if uid not in existing_uids]
+
         if not new_uids:
             raise BadRequestError(message="All provided UIDs are already members of the conversation")
+        
+        invitation = await invitation_service.send_batch_invitations(
+            sender_uid=requester_uid,
+            target_uids=new_uids,
+            invitation_type=InvitationType.CONVERSATION,
+            ref_id=conversation_id,
+            invitation_content=f"You have been invited to join the conversation '{conv.name}'."
+        )
+
+        return ResponseSchema[list[InvitationResponse]](
+            data=[
+                InvitationResponse(
+                    id=inv.id,
+                    sender_uid=inv.sender_uid,
+                    target_uid=inv.target_uid,
+                    type=inv.type,
+                    ref_id=inv.ref_id,
+                    status=inv.status,
+                    created_at=inv.created_at,
+                    expired_at=inv.expired_at
+                )
+                for inv in invitation
+            ]
+        )
+
+    async def add_members_to_conversation(self, conversation_id: str, requester_uid: str, request: AddMembersRequest, background_tasks: BackgroundTasks) -> ResponseSchema[ConversationResponse]:
+        """Thêm nhiều thành viên vào một conversation."""
+        """Xóa một conversation."""
+        await self.send_invitations(conversation_id = conversation_id, requester_uid=requester_uid, target_uids=request.member_uids)
+        conv = await self.conversation_repository.get_by_id(conversation_id)
+
+        # if requester_uid not in conv.member_uids:
+        #     raise PermissionDeniedError(message="You are not a member of this conversation")
+
+        # Lọc ra những UID đã tồn tại trong conversation để tránh lỗi khi thêm trùng lặp
+        # existing_uids = set(conv.member_uids)
+        # new_uids = [uid for uid in request.member_uids if uid not in existing_uids]
+        # if not new_uids:
+        #     raise BadRequestError(message="All provided UIDs are already members of the conversation")
 
         # Gọi Repo cập nhật mảng member_uids + thêm vào sub-collection members
-        # updated_conv = await self.conversation_repository.add_members(conversation_id, new_uids, [ConversationRole.MEMBER] * len(new_uids))
+        # updated_conv = await self.conversation_repository.add_members(conversation_id, request.member_uids, [ConversationRole.MEMBER] * len(request.member_uids))
         
         # Tạo tóm tắt hội thoại cho những thành viên mới này
         # summary = UserConversationSummaryUpdate(
-        #     name=updated_conv.name,
-        #     description=updated_conv.description,
-        #     thumbnail_url=updated_conv.thumbnail_url,
-        #     unread_count=0,
-        #     latest_msg=None
+        #    name=updated_conv.name,
+        #    description=updated_conv.description,
+        #    thumbnail_url=updated_conv.thumbnail_url,
+        #    unread_count=0,
+        #    latest_msg=None
         # )
         # for uid in new_uids: # chạy ngầm task này
         #     background_tasks.add_task(
@@ -116,39 +162,28 @@ class ConversationService:
         #         uid, conversation_id, summary
         #     )
         
-        batch = self.conversation_repository._db.batch()
-        timestamp = datetime.now()
-        for target_uid in new_uids:
-            invitation_ref = invitation_repo._collection.document()
-            invitation = InvitationDocument(
-                id=invitation_ref.id,
-                sender_uid=requester_uid,
-                target_uid=target_uid,
-                type=InvitationType.CONVERSATION,
-                ref_id=conversation_id,
-                status=InvitationStatus.PENDING,
-                created_at=timestamp,
-                updated_at=timestamp,
-                expired_at=timestamp + timedelta(days=7)
-            )
-            notification_ref = invitation_repo._db.collection("notifications").document()
-            notification = NotificationDocument(
-                id=notification_ref.id,
-                receiver_id=target_uid,
-                send_at=timestamp,
-                type=NotificationType.INVITATION,
-                content=f"You have been invited to the conversation '{conv.name}'.",
-                read=False,
-                ref_id=invitation_ref.id,
-                actor_id=requester_uid
-            )
-            batch.create(invitation_ref, invitation.model_dump(mode="python", exclude_none=False))
-            batch.create(notification_ref, notification.model_dump(mode="python", exclude_none=False))
-
-        await batch.commit()
-
         return ResponseSchema(data=await self._build_response(conv))
     
+    async def add_accepted_members(self, conversation_id: str, new_uids: list[str], background_tasks: BackgroundTasks) -> ResponseSchema[ConversationResponse]:
+        """Thêm thành viên vào conversation sau khi họ chấp nhận lời mời."""
+
+        updated_conv = await self.conversation_repository.add_members(conversation_id, new_uids, [ConversationRole.MEMBER] * len(new_uids))
+        
+        # Tạo tóm tắt hội thoại cho thành viên mới này
+        summary = UserConversationSummaryUpdate(
+            name=updated_conv.name,
+            description=updated_conv.description,
+            thumbnail_url=updated_conv.thumbnail_url,
+            unread_count=0,
+            latest_msg=None
+        )
+        for uid in new_uids: # chạy ngầm task này
+            background_tasks.add_task(
+                self.conversation_repository.upsert_user_conversation_summary, 
+                uid, conversation_id, summary)
+
+        return ResponseSchema(data=await self._build_response(updated_conv))
+
     async def get_members_from_conversation(self, conversation_id: str, requester_uid: str) -> ResponseSchema[list[ConversationMemberResponse]]:
         """Lấy danh sách chi tiết thành viên từ một conversation."""
         conv = await self.conversation_repository.get_by_id(conversation_id)

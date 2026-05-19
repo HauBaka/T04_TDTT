@@ -8,10 +8,9 @@ from core.exceptions import (
     NotFoundError,
     PermissionDeniedError,
 )
+from services.notification_service import notification_service
 from repositories.collection_repo import collection_repo
 from repositories.hotel_repo import hotel_repo
-from repositories.invitation_repo import invitation_repo
-from repositories.notification_repo import notification_repo
 from repositories.user_repo import user_repo
 from schemas.collection_schema import (
     CollectionContributorResponse,
@@ -25,11 +24,10 @@ from schemas.collection_schema import (
     CollectionVisibility,
 )
 from schemas.invitation_schema import (
-    InvitationDocument,
-    InvitationStatus,
+    InvitationResponse,
     InvitationType,
 )
-from schemas.notification_schema import NotificationDocument, NotificationType
+from schemas.notification_schema import NotificationCreateRequest, NotificationType
 from schemas.response_schema import ResponseSchema
 from schemas.view_schema import ViewResponse
 
@@ -194,83 +192,112 @@ class CollectionService:
 
         return await self.build_response(updated_collection)
 
+    async def send_invitations(
+        self, collection_id: str, requester_id: str, target_uids: list[str]
+    ) -> ResponseSchema[list[InvitationResponse]]:
+        """Gửi lời mời cộng tác cho nhiều người dùng cùng lúc."""
+        # Check collection có tồn tại không
+        collection = await collection_repo.get_collection(collection_id)
+
+        # Check quyền - chỉ owner mới có thể gửi invitation
+        if requester_id != collection.owner_uid:
+            raise PermissionDeniedError(
+                message="You do not have permission to send invitations for this collection."
+            )
+
+        # Validate người dùng tồn tại
+        if target_uids:
+            existing_users = await user_repo.get_users(target_uids)
+            existing_uids = set(existing_users.keys())
+            not_found_uids = [
+                uid for uid in target_uids if uid not in existing_uids
+                ]
+            if not_found_uids:
+                raise NotFoundError(
+                    f"Invalid target UIDs: {', '.join(not_found_uids)}"
+                )
+            
+        existing_uids = collection.contributor_uids
+
+        new_uids = [uid for uid in target_uids if uid not in existing_uids]
+
+        if not new_uids:
+            raise BadRequestError(
+                message="All provided users are already added to the collection."
+            )
+        from services.invitation_service import invitation_service
+        invitation = await invitation_service.send_batch_invitations(
+            sender_uid=requester_id,
+            target_uids=new_uids,
+            invitation_type=InvitationType.COLLECTION,
+            ref_id=collection_id,
+            invitation_content=f"You have been invited to the collection '{collection.name}'."
+        )
+
+        return ResponseSchema[list[InvitationResponse]](
+            data=[
+                InvitationResponse(
+                    id=inv.id,
+                    sender_uid=inv.sender_uid,
+                    target_uid=inv.target_uid,
+                    type=inv.type,
+                    ref_id=inv.ref_id,
+                    status=inv.status,
+                    created_at=inv.created_at,
+                    expired_at=inv.expired_at
+                )
+                for inv in invitation
+            ]
+        )
+
     async def add_contributors_to_collection(
         self, collection_id: str, requester_id: str, contributor_uids: list[str]
     ) -> ResponseSchema[CollectionResponse]:
         """Thêm nhiều cộng tác viên vào một collection."""
+        await self.send_invitations(collection_id=collection_id, requester_id=requester_id, target_uids=contributor_uids)
         # Check collection có tồn tại không
         collection = await collection_repo.get_collection(collection_id)
 
         # Check quyền - chỉ owner mới có thể thêm contributors
-        if requester_id != collection.owner_uid:
-            raise PermissionDeniedError(
-                message="You do not have permission to add contributors to this collection."
-            )
+        # if requester_id != collection.owner_uid:
+        #    raise PermissionDeniedError(
+        #        message="You do not have permission to add contributors to this collection."
+        #    )
 
         # Validate người dùng tồn tại
-        if contributor_uids:
-            existing_users = await user_repo.get_users(contributor_uids)
-            existing_uids = set(existing_users.keys())
-            not_found_uids = [
-                uid for uid in contributor_uids if uid not in existing_uids
-            ]
-            if not_found_uids:
-                raise NotFoundError(
-                    f"Invalid contributor UIDs: {', '.join(not_found_uids)}"
-                )
+        # if contributor_uids:
+        #    existing_users = await user_repo.get_users(contributor_uids)
+        #    existing_uids = set(existing_users.keys())
+        #    not_found_uids = [
+        #        uid for uid in contributor_uids if uid not in existing_uids
+        #    ]
+        #    if not_found_uids:
+        #        raise NotFoundError(
+        #            f"Invalid contributor UIDs: {', '.join(not_found_uids)}"
+        #        )
 
         # Lấy contributors hiện có
-        existing_uids = collection.contributor_uids
+        # existing_uids = collection.contributor_uids
 
         # Lọc những uid bị trùng lặp
-        new_uids = [uid for uid in contributor_uids if uid not in existing_uids]
+        # new_uids = [uid for uid in contributor_uids if uid not in existing_uids]
 
-        if not new_uids:
-            raise BadRequestError(
-                message="All provided contributors are already added to the collection."
-            )
+        # if not new_uids:
+        #     raise BadRequestError(
+        #         message="All provided contributors are already added to the collection."
+        #     )
 
         # Thêm vào collection (lưu vào sub-collection với uid, contributed_count, joined_at)
-        # updated_collection = await collection_repo.add_contributors_to_collection(collection_id, new_uids)
-
-        batch = invitation_repo._db.batch()
-        timestamp = datetime.now(timezone.utc)
-        for target_uid in new_uids:
-            invitation_ref = invitation_repo._collection.document()
-            notification_ref = notification_repo._collection.document()
-            invitation = InvitationDocument(
-                id=invitation_ref.id,
-                sender_uid=requester_id,
-                target_uid=target_uid,
-                type=InvitationType.COLLECTION,
-                status=InvitationStatus.PENDING,
-                ref_id=collection_id,
-                created_at=timestamp,
-                updated_at=timestamp,
-                expired_at=timestamp + timedelta(days=7),  # Ví dụ: lời mời
-            )
-            notification = NotificationDocument(
-                id=notification_ref.id,
-                receiver_id=target_uid,
-                send_at=timestamp,
-                type=NotificationType.INVITATION,
-                content=f"You have been invited to the collection '{collection.name}'.",
-                read=False,
-                ref_id=invitation_ref.id,
-                actor_id=requester_id,
-            )
-            batch.create(
-                invitation_ref, invitation.model_dump(mode="python", exclude_none=False)
-            )
-            batch.create(
-                notification_ref,
-                notification.model_dump(mode="python", exclude_none=False),
-            )
-
-        await batch.commit()
+        # updated_collection = await collection_repo.add_contributors_to_collection(collection_id, contributor_uids)
 
         return await self.build_response(collection)
+    
+    async def add_accepted_contributors(self, collection_id: str, contributor_uids: list[str]) -> ResponseSchema[CollectionResponse]:
+        """Thêm những cộng tác viên đã chấp nhận lời mời vào một collection."""
+        updated_collection = await collection_repo.add_contributors_to_collection(collection_id, contributor_uids)
 
+        return await self.build_response(updated_collection)
+    
     async def get_contributors_from_collection(
         self, collection_id: str, requester_id: str | None
     ) -> ResponseSchema[list[CollectionContributorResponse]]:
@@ -321,27 +348,18 @@ class CollectionService:
             collection_id, valid_uids
         )
 
-        batch = notification_repo._db.batch()
-        timestamp = datetime.now(timezone.utc)
-
-        for target_uid in valid_uids:
-            notification_ref = notification_repo._collection.document()
-            notification = NotificationDocument(
-                id=notification_ref.id,
-                receiver_id=target_uid,
-                send_at=timestamp,
+        notifications = [
+            NotificationCreateRequest(
+                receiver_id=uid,
                 type=NotificationType.SYSTEM,
                 content=f"You have been removed from the collection '{collection.name}'.",
-                read=False,
                 ref_id=collection_id,
-                actor_id=requester_id,
+                actor_id=requester_id
             )
-            batch.create(
-                notification_ref,
-                notification.model_dump(mode="python", exclude_none=False),
-            )
+            for uid in valid_uids
+        ]
 
-        await batch.commit()
+        await notification_service.create_batch_notifications(notifications)
 
         return await self.build_response(updated_collection)
 
