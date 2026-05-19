@@ -122,20 +122,21 @@ class BehaviorEventRepo(BaseRepository):
             logger.warning(f"Unexpected aggregation response for user_uid={user_uid}")
             return 0
 
-    async def purge_older_than(self, cutoff_iso: str) -> int:
-        """Xóa tất cả events có created_at < cutoff_iso."""
-        try:
-            cutoff_dt = datetime.fromisoformat(cutoff_iso.replace("Z", "+00:00"))
-        except ValueError as e:
-            logger.error(f"Invalid cutoff_iso format: {cutoff_iso}. Error: {e}")
-            return 0
-        query = self._db.collection_group(self._subcol_name).where(filter=FieldFilter("created_at", "<", cutoff_dt))
+    async def purge_older_than(self,user_uid: str, cutoff_dt: datetime) -> int:
+        """Xóa tất cả events có created_at < cutoff_dt."""
+        
+        query = (
+            self._user_events_ref(user_uid)
+            .where(filter=FieldFilter("created_at", "<", cutoff_dt))
+        )
+        docs = await query.get()
+        
         deleted_count = 0
         batch = self._db.batch()
         batch_ops = 0
 
-        async for doc in query.stream():
-            batch.delete(doc.reference)
+        for doc in docs:
+            batch.delete(doc.reference) 
             batch_ops += 1
             deleted_count += 1
 
@@ -148,5 +149,6 @@ class BehaviorEventRepo(BaseRepository):
             await batch.commit()
 
         return deleted_count
+
     
 behavior_event_repo = BehaviorEventRepo()

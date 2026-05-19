@@ -45,10 +45,13 @@ class BehaviorService:
         deleted_count = await self.repo.delete_events(user_uid, [event_id])
         return deleted_count > 0
 
-    async def purge_old_events(self, days: int = 365) -> int:
+    async def purge_old_events(self, user_uid: str, days: int = 365) -> int:
         """Xóa events cũ hơn N ngày (retention policy)."""
-        cutoff_dt = datetime.now(timezone.utc) - timedelta(days=days)
-        cutoff_iso = cutoff_dt.isoformat().replace("+00:00", "Z")
-        return await self.repo.purge_older_than(cutoff_iso)
-    
+        if days == 0:
+            cutoff_dt = datetime(2030, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
+        else:
+            # Các case khác giữ nguyên logic cũ của ông
+            cutoff_dt = datetime.now(timezone.utc) - timedelta(days=days)
+        return await self.repo.purge_older_than(user_uid, cutoff_dt)
+
 behavior_service = BehaviorService()
