@@ -1,15 +1,13 @@
 from fastapi import BackgroundTasks
-from datetime import datetime, timezone
-from core.exceptions import BadRequestError, NotFoundError, AppException, PermissionDeniedError
+from datetime import datetime, timedelta, timezone
+from core.exceptions import BadRequestError, NotFoundError, PermissionDeniedError
 from repositories.invitation_repo import invitation_repo
 from repositories.user_repo import user_repo
-from schemas.conversation_schema import ConversationRole, UserConversationSummaryUpdate
 from schemas.invitation_schema import InvitationCreateRequest, InvitationDocument, InvitationResponse, InvitationStatus, InvitationType, InvitationUpdateRequest
+from schemas.notification_schema import NotificationCreateRequest, NotificationType
 from schemas.response_schema import ResponseSchema
+from services.notification_service import notification_service
 from services.collection_service import collection_service
-from repositories.collection_repo import collection_repo
-from services.conversation_service import conversation_service
-from repositories.conversation_repo import conversation_repo
 
 class InvitationService:
     def __init__(self):
@@ -40,33 +38,68 @@ class InvitationService:
 
         if invitation_update.status == InvitationStatus.ACCEPTED:
             if updated_invitation.type == InvitationType.COLLECTION:
-                await collection_repo.add_contributors_to_collection(
+                await collection_service.add_accepted_contributors(
                     collection_id=updated_invitation.ref_id,
                     contributor_uids=[requester_uid]
                 )
             
             elif updated_invitation.type == InvitationType.CONVERSATION:
-                updated_conversation =await conversation_repo.add_members(
+                from services.conversation_service import conversation_service
+                await conversation_service.add_accepted_members(
                     conversation_id=updated_invitation.ref_id,
-                    member_uids=[requester_uid],
-                    roles=[ConversationRole.MEMBER.value]
+                    new_uids=[requester_uid],
+                    background_tasks=BackgroundTasks()
                 )
-                # Tạo tóm tắt hội thoại cho người dùng mới này
-                summary = UserConversationSummaryUpdate(
-                    name=updated_conversation.name,
-                    description=updated_conversation.description,
-                    thumbnail_url=updated_conversation.thumbnail_url,
-                    unread_count = 0,
-                    latest_msg=None
-                )
-                await conversation_repo.upsert_user_conversation_summary(
-                    requester_uid, updated_invitation.ref_id, summary
+
+            elif updated_invitation.type == InvitationType.TRIP:
+                from services.trip_service import trip_service
+                await trip_service.add_accepted_members(
+                    trip_id=updated_invitation.ref_id,
+                    member_uids=[requester_uid]
                 )
 
         elif invitation_update.status == InvitationStatus.DECLINED:
             pass
 
         return self.build_invitation_response(updated_invitation)
+    
+    async def send_batch_invitations(self, sender_uid: str, target_uids: list[str], invitation_type: InvitationType, ref_id: str, invitation_content: str) -> list[InvitationResponse]:
+        """Gửi hàng loạt lời mời."""
+        batch = self.invitation_repo._db.batch()
+        timestamp = datetime.now(timezone.utc)
+        invitations = []
+
+        for target_uid in target_uids:
+            invitation_ref = self.invitation_repo._collection.document()
+            invitation_doc = InvitationDocument(
+                id=invitation_ref.id,
+                sender_uid=sender_uid,
+                target_uid=target_uid,
+                type=invitation_type,
+                ref_id=ref_id,
+                status=InvitationStatus.PENDING,
+                created_at=timestamp,
+                updated_at=timestamp,
+                expired_at=timestamp + timedelta(days=7),
+            )
+            batch.create(invitation_ref, invitation_doc.model_dump(mode="python", exclude_none=False))
+            invitations.append(invitation_doc)
+
+        await batch.commit()
+
+        notifications = [
+            NotificationCreateRequest(
+                receiver_id=inv.target_uid,
+                type=NotificationType.INVITATION,
+                content=invitation_content,
+                ref_id=inv.id,
+                actor_id=inv.sender_uid
+            )
+            for inv in invitations
+        ]
+
+        await notification_service.create_batch_notifications(notifications)
+        return invitations
     
     async def delete_invitation(self, invitation_id: str, requester_uid: str) -> ResponseSchema[bool]:
         """Xóa một lời mời cụ thể."""
