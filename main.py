@@ -25,6 +25,9 @@ from api.view import view_router
 from core.database import firebase_manager
 from core.exceptions import AppException
 from core.limiter import AutoRateLimitMiddleware, limiter
+from externals.PhoBERT import PhoBERT
+from externals.SemanticModel import semantic_model_client
+from mock_data.virtual_review import virtual_review_manager
 from services.discover_background_worker import discover_background_worker
 
 
@@ -33,16 +36,16 @@ from services.discover_background_worker import discover_background_worker
 async def lifespan(app: FastAPI):
     # Khởi tạo Firebase
     await firebase_manager.initialize()
-    # # Khởi tạo Virtual Review
-    # try:
-    #     virtual_review_manager.initialize("mock_data/user_reviews.csv")
-    # except FileNotFoundError as e:
-    #     logger.error(f"Error initializing virtual review manager: {e}")
+    # Khởi tạo Virtual Review
+    try:
+        virtual_review_manager.initialize("mock_data/user_reviews.csv")
+    except FileNotFoundError as e:
+        logger.error(f"Error initializing virtual review manager: {e}")
 
-    # # Khởi tạo PhoBERT
-    # PhoBERT.load_model()
-    # # Khởi tạo Semantic Model
-    # semantic_model_client.load_model()
+    # Khởi tạo PhoBERT
+    PhoBERT.load_model()
+    # Khởi tạo Semantic Model
+    semantic_model_client.load_model()
     # Khởi tạo HTTP client
     http_client._http_client = httpx.AsyncClient(timeout=10.0)
     await discover_background_worker.start()

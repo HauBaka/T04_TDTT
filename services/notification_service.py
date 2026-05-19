@@ -4,7 +4,6 @@ from schemas.notification_schema import (
     NotificationCreateRequest,
     NotificationDocument,
     NotificationResponse,
-    NotificationType,
     NotificationUpdateRequest,
 )
 from schemas.response_schema import ResponseSchema
@@ -29,7 +28,9 @@ class NotificationService:
     ) -> ResponseSchema[NotificationResponse]:
         """Cập nhật trạng thái của một thông báo cụ thể (ví dụ: đánh dấu đã đọc)."""
         # Get notification from database
-        notification = await self.notification_repository.get_by_id(notification_id)
+        notification = await self.notification_repository.get_by_id(
+            user_id, notification_id
+        )
 
         # Check permission - only the recipient can update
         if user_id != notification.receiver_id:
@@ -48,7 +49,7 @@ class NotificationService:
             )
 
         updated_notification = await self.notification_repository.update(
-            notification_id, update_request
+            user_id, notification_id, update_request
         )
 
         return self.build_notification_response(updated_notification)
@@ -72,7 +73,9 @@ class NotificationService:
     ) -> ResponseSchema[bool]:
         """Xóa một thông báo cụ thể."""
         # Get notification from database
-        notification = await self.notification_repository.get_by_id(notification_id)
+        notification = await self.notification_repository.get_by_id(
+            user_id, notification_id
+        )
 
         # Check permission - only the recipient can delete
         if user_id != notification.receiver_id:
@@ -81,7 +84,7 @@ class NotificationService:
             )
 
         # Delete from database
-        await self.notification_repository.delete(notification_id)
+        await self.notification_repository.delete(user_id, notification_id)
 
         return ResponseSchema[bool](data=True)
 
@@ -93,7 +96,7 @@ class NotificationService:
             id=notification_data.id,
             receiver_id=notification_data.receiver_id,
             send_at=notification_data.send_at,
-            type=NotificationType(notification_data.type),
+            type=notification_data.type,
             content=notification_data.content,
             read=notification_data.read,
             ref_id=notification_data.ref_id,
