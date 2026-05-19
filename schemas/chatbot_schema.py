@@ -4,6 +4,7 @@ from datetime import datetime
 from enum import Enum
 
 from pydantic import BaseModel, Field
+
 from schemas.discover_schema import GPSCoordinates
 from schemas.trip_context_schema import TravelStyle
 
