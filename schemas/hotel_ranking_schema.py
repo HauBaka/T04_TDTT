@@ -5,18 +5,15 @@ from pydantic import BaseModel, Field
 from schemas.collection_schema import CollectionDocument, CollectionPublicResponse
 from schemas.discover_schema import DiscoverHotel, WeatherInfo
 from schemas.trip_context_schema import TripSearchCriteria
-from schemas.user_preference_schema import (
-    ScoringWeights,
-    UserBehaviorEvent,
-    UserTravelPreference,
-)
+from schemas.user_behavior_schema import UserBehaviorEventDocument
+from schemas.user_preference_schema import ScoringWeights, UserTravelPreference
 
 class HotelRankingRequest(BaseModel):
     hotels: list[DiscoverHotel]
     profile: UserTravelPreference
     trip_criteria: TripSearchCriteria | None = None
     collections: list[CollectionDocument] = Field(default_factory=list)
-    history: list[UserBehaviorEvent] = Field(default_factory=list)
+    history: list[UserBehaviorEventDocument] = Field(default_factory=list)
     weather_by_identity: dict[str, list[WeatherInfo]] = Field(default_factory=dict)
     limit: int = 10
     weights: ScoringWeights | None = None

@@ -1,6 +1,18 @@
 import asyncio
 from typing import cast
 
+from fastapi import BackgroundTasks
+from core.exceptions import BadRequestError, ConflictError, NotFoundError, ValidationError
+from repositories.conversation_repo import conversation_repo
+from repositories.user_repo import user_repo
+from repositories.collection_repo import collection_repo
+from schemas.conversation_schema import ConversationResponse
+from schemas.user_schema import UserCollectionsResponse, UserPublicResponse, UserPrivateResponse, UserSaveCollectionRequest, UserUpdateRequest
+from schemas.collection_schema import CollectionPrivateResponse, CollectionPublicResponse
+from schemas.user_behavior_schema import UserBehaviorEventCreateRequest, UserEventType
+from schemas.view_schema import ViewResponse
+from schemas.response_schema import ResponseSchema
+from services.behavior_service import behavior_service
 from loguru import logger
 from pydantic import ValidationError as PydanticValidationError
 
@@ -247,7 +259,7 @@ class UserService:
             return [to_public(doc) for doc in collections]
 
     async def save_collection(
-        self, requester_uid: str, collection: UserSaveCollectionRequest
+        self, requester_uid: str, collection: UserSaveCollectionRequest,background_tasks: BackgroundTasks
     ) -> ResponseSchema[bool]:
         # Check collection exists
         collection_doc = await collection_repo.get_collection(collection.collection_id)
@@ -266,13 +278,21 @@ class UserService:
             collection_repo.add_saver(collection.collection_id, requester_uid),
         )
 
-        return ResponseSchema(
-            status_code=200, message="Collection saved successfully", data=True
+        background_tasks.add_task(
+            behavior_service.record_event,
+            requester_uid,
+            UserBehaviorEventCreateRequest(
+                event_type=UserEventType.SAVE_COLLECTION,
+                target_id=collection_doc.id,
+                target_name=collection_doc.name,
+                metadata={"target_type": "collection"},
+                source="user_service",
+            ),
         )
 
-    async def unsave_collection(
-        self, requester_uid: str, collection_id: str
-    ) -> ResponseSchema[bool]:
+        return ResponseSchema(status_code=200, message="Collection saved successfully", data=True)
+
+    async def unsave_collection(self, requester_uid: str, collection_id: str, background_tasks: BackgroundTasks) -> ResponseSchema[bool]:
         # Check collection exists
         collection_doc = await collection_repo.get_collection(collection_id)
         user_doc = await self.user_repo.get_user(requester_uid)
@@ -286,18 +306,28 @@ class UserService:
             collection_repo.remove_saver(collection_id, requester_uid),
         )
 
-        return ResponseSchema(
-            status_code=200, message="Collection unsaved successfully", data=True
+        background_tasks.add_task(
+            behavior_service.record_event,
+            requester_uid,
+            UserBehaviorEventCreateRequest(
+                event_type=UserEventType.REMOVE_COLLECTION,
+                target_id=collection_doc.id,
+                target_name=collection_doc.name,
+                metadata={"target_type": "collection"},
+                source="user_service",
+            ),
         )
 
+        return ResponseSchema(status_code=200, message="Collection unsaved successfully", data=True)
+
     async def add_favourite_place(
-        self, requester_uid: str, place_id: str
+        self, requester_uid: str, place_id: str,background_tasks: BackgroundTasks
     ) -> ResponseSchema[bool]:
         user_doc = await self.user_repo.get_user(requester_uid)
 
         try:
             await collection_service.add_places_to_collection(
-                user_doc.liked_collection, requester_uid, [place_id]
+                user_doc.liked_collection, requester_uid, [place_id], background_tasks
             )
             return ResponseSchema(
                 status_code=200,
@@ -312,13 +342,13 @@ class UserService:
             )
 
     async def remove_favourite_place(
-        self, requester_uid: str, place_id: str
+        self, requester_uid: str, place_id: str,background_tasks: BackgroundTasks
     ) -> ResponseSchema[bool]:
         user_doc = await self.user_repo.get_user(requester_uid)
 
         try:
             await collection_service.remove_places_from_collection(
-                user_doc.liked_collection, requester_uid, [place_id]
+                user_doc.liked_collection, requester_uid, [place_id],background_tasks
             )
             return ResponseSchema(
                 status_code=200,

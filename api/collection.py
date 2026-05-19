@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends
 from schemas.collection_schema import (
     AddMultipleContributorsRequest, 
     AddMultiplePlacesRequest, 
@@ -37,16 +37,16 @@ async def update_collection(collection_id: str, collection_request: CollectionUp
     return await collection_service.update_collection(collection_id, requester.get("uid"), collection_request)
 
 @collection_router.delete("/collections/{collection_id}", response_model=ResponseSchema[bool])
-async def delete_collection(collection_id: str, requester=Depends(get_current_user(optional=False))):
+async def delete_collection(collection_id: str, background_tasks: BackgroundTasks, requester=Depends(get_current_user(optional=False))):
     """Xóa một collection cụ thể."""
-    return await collection_service.delete_collection(collection_id, requester.get("uid"))
+    return await collection_service.delete_collection(collection_id, requester.get("uid"), background_tasks=background_tasks)
 
 # Place
 
 @collection_router.post("/collections/{collection_id}/places", response_model=ResponseSchema[CollectionResponse])
-async def add_places_to_collection(collection_id: str, places_request: AddMultiplePlacesRequest, requester=Depends(get_current_user(optional=False))):
+async def add_places_to_collection(collection_id: str, places_request: AddMultiplePlacesRequest, background_tasks: BackgroundTasks, requester=Depends(get_current_user(optional=False))):
     """Thêm nhiều địa điểm vào một collection cụ thể."""
-    return await collection_service.add_places_to_collection(collection_id, requester.get("uid"), places_request.place_ids)
+    return await collection_service.add_places_to_collection(collection_id, requester.get("uid"), places_request.place_ids, background_tasks=background_tasks)
 
 @collection_router.get("/collections/{collection_id}/places", response_model=ResponseSchema[list[CollectionPlaceResponse]])
 async def get_places_from_collection(collection_id: str, requester=Depends(get_current_user(optional=True))):
@@ -54,9 +54,9 @@ async def get_places_from_collection(collection_id: str, requester=Depends(get_c
     return await collection_service.get_places_from_collection(collection_id, requester.get("uid") if requester else None)
 
 @collection_router.delete("/collections/{collection_id}/places", response_model=ResponseSchema[CollectionResponse])
-async def remove_places_from_collection(collection_id: str, places_request: RemoveMultiplePlacesRequest, requester=Depends(get_current_user(optional=False))):
+async def remove_places_from_collection(collection_id: str, places_request: RemoveMultiplePlacesRequest, background_tasks: BackgroundTasks, requester=Depends(get_current_user(optional=False))):
     """Xóa nhiều địa điểm khỏi một collection cụ thể."""
-    return await collection_service.remove_places_from_collection(collection_id, requester.get("uid"), places_request.place_ids)
+    return await collection_service.remove_places_from_collection(collection_id, requester.get("uid"), places_request.place_ids, background_tasks=background_tasks)
 
 # Contributor
 
