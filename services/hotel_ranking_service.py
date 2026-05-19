@@ -951,52 +951,32 @@ class HotelRankingService:
         if requester_uid:
             try:
                 private_user = await user_repo.get_user(requester_uid)
-                if not private_user:
-                    private_user = {}
+                if private_user:
+                    if private_user.travel_profile:
+                        profile = private_user.travel_profile
+                    if private_user.scoring_weights:
+                        scoring_weights = private_user.scoring_weights
 
-                profile_data = getattr(private_user, "travel_profile", None)
-                if isinstance(profile_data, UserTravelPreference):
-                    profile = profile_data
-                elif isinstance(profile_data, dict):
-                    try:
-                        profile = UserTravelPreference.model_validate(profile_data)
-                    except Exception:
-                        profile = UserTravelPreference()
+                # Lấy song song collections (own) và history
+                collections_task = asyncio.create_task(collection_repo.get_user_collections(requester_uid))
+                history_task = asyncio.create_task(behavior_service.get_recent_events(requester_uid, limit=20))
+                
+                collections_owned, history = await asyncio.gather(
+                    collections_task, 
+                    history_task,
+                    return_exceptions=True
+                )
+                
+                if isinstance(collections_owned, list):
+                    collections = collections_owned[:20]
+                else:
+                    collections = []
+                    
+                if isinstance(history, list):
+                    history = history[:20]
+                else:
+                    history = []
 
-                collection_data = getattr(private_user, "collections", [])
-                if isinstance(collection_data, list):
-                    parsed_collections: list[CollectionDocument] = []
-                    for item in collection_data:
-                        if isinstance(item, CollectionDocument):
-                            parsed_collections.append(item)
-                        elif isinstance(item, dict):
-                            try:
-                                parsed_collections.append(CollectionDocument.model_validate(item))
-                            except Exception:
-                                continue
-                    collections = parsed_collections[:50]
-
-                history_data = getattr(private_user, "user_behavior_history", [])
-                if isinstance(history_data, list):
-                    parsed_history: list[UserBehaviorEventDocument] = []
-                    for event in history_data:
-                        if isinstance(event, UserBehaviorEventDocument):
-                            parsed_history.append(event)
-                        elif isinstance(event, dict):
-                            try:
-                                parsed_history.append(UserBehaviorEventDocument.model_validate(event))
-                            except Exception:
-                                continue
-                    history = parsed_history[:100]
-
-                weight_data = getattr(private_user, "scoring_weights", None)
-                if isinstance(weight_data, ScoringWeights):
-                    scoring_weights = weight_data
-                elif isinstance(weight_data, dict):
-                    try:
-                        scoring_weights = ScoringWeights.model_validate(weight_data)
-                    except Exception:
-                        scoring_weights = None
             except Exception as exc:
                 logger.warning(f"Không tải được personalization context cho ranking: {str(exc)}")
 
