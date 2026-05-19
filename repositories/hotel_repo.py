@@ -70,7 +70,7 @@ class HotelRepository(BaseRepository):
             ValidationError: Nếu property_tokens rỗng hoặc lỗi trong quá trình xóa
         """
         if not property_tokens:
-            raise ValidationError("No property tokens provided for deletion")
+            logger.info("No property tokens provided for deletion")
 
         batch = self._db.batch()
         count = 0
@@ -226,7 +226,7 @@ class HotelRepository(BaseRepository):
                 logger.warning(f"Skip invalid hotel document {doc.id}: {str(exc)}")
 
         return hotels
-    
+
     async def get_hotels(self, property_tokens: list[str]) -> dict[str, HotelDocument]:
         """Lấy thông tin nhiều khách sạn từ danh sách property tokens
 

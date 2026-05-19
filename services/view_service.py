@@ -1,12 +1,6 @@
-from fastapi import BackgroundTasks
-from repositories.view_repo import view_repository
-from repositories.collection_repo import collection_repo
-from repositories.hotel_repo import hotel_repo
-from schemas.collection_schema import CollectionPublicResponse, CollectionVisibility
-from schemas.discover_schema import DiscoverHotel
-from schemas.user_behavior_schema import UserBehaviorEventCreateRequest, UserEventType
 from typing import cast
 
+from fastapi import BackgroundTasks
 from loguru import logger
 
 from repositories.collection_repo import collection_repo
@@ -20,6 +14,7 @@ from schemas.collection_schema import (
     CollectionVisibility,
 )
 from schemas.discover_schema import DiscoverHotel, HotelDocument
+from schemas.user_behavior_schema import UserBehaviorEventCreateRequest, UserEventType
 from schemas.view_schema import TopViewRequest, ViewTargetType
 from services.behavior_service import behavior_service
 
@@ -92,7 +87,12 @@ class ViewService:
         return result_responses
 
     async def add_view(
-        self, viewer_id: str, target_id: str, target_type: ViewTargetType,background_tasks: BackgroundTasks
+        self,
+        viewer_id: str,
+        authorized: bool,
+        target_id: str,
+        target_type: ViewTargetType,
+        background_tasks: BackgroundTasks,
     ) -> None:
         if target_type == ViewTargetType.COLLECTION:
             target_doc = await self.collection_repo.get_collection(target_id)
@@ -116,16 +116,18 @@ class ViewService:
 
         await self.view_repository.add_view(viewer_id, target_id, target_type)
 
-        background_tasks.add_task(
-            behavior_service.record_event,
-            viewer_id,
-            UserBehaviorEventCreateRequest(
-                event_type=UserEventType.VIEW,
-                target_id=target_id,
-                target_name=str(target_type.value),
-                metadata={"target_type": str(target_type.value)},
-                source="view_service",
-            ),
-        )
+        if authorized:  # Chỉ ghi behavior event nếu user đã xác thực
+            background_tasks.add_task(
+                behavior_service.record_event,
+                viewer_id,
+                UserBehaviorEventCreateRequest(
+                    event_type=UserEventType.VIEW,
+                    target_id=target_id,
+                    target_name=str(target_type.value),
+                    metadata={"target_type": str(target_type.value)},
+                    source="view_service",
+                ),
+            )
+
 
 view_service = ViewService()

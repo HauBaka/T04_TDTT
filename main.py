@@ -6,31 +6,12 @@ from fastapi.concurrency import asynccontextmanager
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from api.health import health_router
-#from api.discover import discover_router
-from api.auth import auth_router
-from api.user import user_router
-from api.collection import collection_router
-from api.invitation import invitation_router
-from api.notification import notification_router
-from api.conversation import conversation_router
-from api.trip import trip_router
-from api.chatbot import chatbot_router
-from api.view import view_router
-from api.upload import upload_router
-from core.database import firebase_manager
-from core.exceptions import AppException
-from core.limiter import limiter, AutoRateLimitMiddleware
-from slowapi.middleware import SlowAPIMiddleware
-from mock_data.virtual_review import virtual_review_manager
-from externals.PhoBERT import PhoBERT
-from externals.SemanticModel import semantic_model_client
-from services.discover_background_worker import discover_background_worker
 from loguru import logger
 from slowapi.middleware import SlowAPIMiddleware
 
 import core.http_client as http_client
 from api.auth import auth_router
+from api.chatbot import chatbot_router
 from api.collection import collection_router
 from api.conversation import conversation_router
 from api.discover import discover_router
@@ -44,6 +25,7 @@ from api.view import view_router
 from core.database import firebase_manager
 from core.exceptions import AppException
 from core.limiter import AutoRateLimitMiddleware, limiter
+from services.discover_background_worker import discover_background_worker
 
 
 # Khởi tạo các thành phần cần thiết
@@ -109,7 +91,7 @@ async def log_requests(request: Request, call_next):
 
 # Đăng ký router
 app.include_router(health_router, tags=["health"])
-#app.include_router(discover_router, tags=["discover"])
+app.include_router(discover_router, tags=["discover"])
 app.include_router(auth_router, tags=["auth"])
 app.include_router(user_router, tags=["user"])
 app.include_router(collection_router, tags=["collection"])

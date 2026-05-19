@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -12,16 +13,22 @@ class UserEventType(str, Enum):
     REMOVE_PLACE = "xoa_place"
     SAVE_COLLECTION = "luu_collection"
     REMOVE_COLLECTION = "xoa_collection"
+
+
 class GetRecentBehaviourEventRequest(BaseModel):
     user_uid: str
     limit: int = 100
     last_doc: Any | None = None
+
+
 class UserBehaviorEventCreateRequest(BaseModel):
     event_type: UserEventType
     target_id: str | None = None
     target_name: str | None = None
     metadata: dict[str, str] | None = None
     source: str | None = None
+
+
 class UserBehaviorEventDocument(BaseModel):
     id: str
     user_uid: str
