@@ -214,10 +214,9 @@ class SummaryService:
                     )
                     # Đặt ngày hết hạn là thời điểm hiện tại (now) để lần tìm kiếm sau nó tự động gọi lại AI thay vì bị kẹt 14 ngày
                     place.ai_summary.ai_summary_expiration_date = now
-                    continue
-
-                # Cập nhật kết quả AI vào Place
-                place.ai_summary = summary
-                place.ai_summary.ai_summary_expiration_date = new_expiration_date
+                elif isinstance(summary, AIReviewSummary):
+                    # Cập nhật kết quả AI vào Place
+                    place.ai_summary = summary
+                    place.ai_summary.ai_summary_expiration_date = new_expiration_date
 
 summary_service = SummaryService()

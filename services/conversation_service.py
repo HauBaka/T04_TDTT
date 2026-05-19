@@ -134,6 +134,9 @@ class ConversationService:
         if conv.owner_uid in target_uids:
             raise PermissionDeniedError(message="Owner cannot be removed from the conversation")
 
+        if "chatbot_system" in target_uids:
+            raise PermissionDeniedError(message="System member cannot be removed from the conversation")
+
         # Lọc ra những UID không tồn tại trong conversation để tránh lỗi khi xóa
         existing_uids = set(conv.member_uids)
         valid_target_uids = [uid for uid in target_uids if uid in existing_uids]

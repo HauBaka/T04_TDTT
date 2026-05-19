@@ -11,7 +11,7 @@ from typing import Iterable
 
 from loguru import logger
 
-from schemas.collection_schema import CollectionPublic
+from schemas.collection_schema import CollectionDocument
 from schemas.discover_schema import DiscoverHotel, DiscoverRequest, WeatherInfo
 from schemas.hotel_ranking_schema import (
     HotelRankingItem,
@@ -19,12 +19,13 @@ from schemas.hotel_ranking_schema import (
     HotelRankingResponse,
 )
 from schemas.trip_context_schema import TripSearchCriteria, TravelStyle
-from schemas.user_behavior_schema import UserBehaviorEvent, UserEventType
+from schemas.user_behavior_schema import UserBehaviorEventDocument, UserEventType
 from schemas.user_preference_schema import (
     ScoringWeights,
     UserTravelPreference,
     WeatherTolerance,
 )
+from externals.SemanticModel import semantic_model_client
 from repositories.user_repo import user_repo
 from repositories.collection_repo import collection_repo
 from services.semantic_encoder import semantic_text_encoder
@@ -81,6 +82,8 @@ SINH_NGHIA_MAP = {
 
 _NON_WORD_RE = re.compile(r"[^\w\s]+", flags=re.UNICODE)
 _MULTI_SPACE_RE = re.compile(r"\s+")
+_ALPHA_TOKEN_RE = re.compile(r"[a-z]")
+_MODEL_MIN_TOKEN_LEN = 2
 _SINH_NGHIA_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = tuple(
     (
         re.compile(rf"\b{re.escape(english_phrase)}\b", flags=re.UNICODE),
@@ -125,13 +128,61 @@ def normalize_text(text: str) -> str:
 
     return cleaned
 
-# Tách text thành tokens sau khi đã được normalize, dùng để so sánh với các tập token của khách sạn, bộ sưu tập, sự kiện lịch sử,..
 @lru_cache(maxsize=4096)
-def tokenize_text(text: str) -> tuple[str, ...]:
+def _model_tokenize_text(text: str) -> tuple[str, ...]:
     normalized = normalize_text(text)
     if not normalized:
         return tuple()
-    return tuple(normalized.split())
+
+    try:
+        semantic_model_client.load_model()
+        tokenizer = semantic_model_client.tokenizer
+    except Exception as exc:
+        logger.warning(f"Không bật được model tokenizer cho ranking: {str(exc)}")
+        return tuple()
+
+    try:
+        pieces = tokenizer.tokenize(normalized)
+    except Exception:
+        return tuple()
+
+    tokens: list[str] = []
+    for piece in pieces:
+        cleaned_piece = piece.replace("##", "").replace("▁", " ").strip()
+        cleaned_piece = _NON_WORD_RE.sub(" ", cleaned_piece)
+        cleaned_piece = _MULTI_SPACE_RE.sub(" ", cleaned_piece).strip()
+        if not cleaned_piece:
+            continue
+        for word in cleaned_piece.split():
+            if len(word) < _MODEL_MIN_TOKEN_LEN:
+                continue
+            if not _ALPHA_TOKEN_RE.search(word):
+                continue
+            tokens.append(word)
+
+    return tuple(dict.fromkeys(tokens))
+
+# Tách text thành tokens sau khi đã được normalize, dùng để so sánh với các tập token của khách sạn, bộ sưu tập, sự kiện lịch sử,..
+@lru_cache(maxsize=4096)
+def tokenize_text(text: str, use_model_tokens: bool = False) -> tuple[str, ...]:
+    normalized = normalize_text(text)
+    if not normalized:
+        return tuple()
+
+    words = [word for word in normalized.split() if word]
+    if not words:
+        return tuple()
+
+    # Giữ unigram như cũ, thêm bigram để tăng khả năng match cụm từ ngắn.
+    tokens: list[str] = list(words)
+    tokens.extend(f"{left} {right}" for left, right in zip(words, words[1:]))
+
+    # Chỉ trộn token model cho text tự do để giảm nhiễu lên field có cấu trúc.
+    if use_model_tokens:
+        tokens.extend(_model_tokenize_text(text))
+
+    # Loại trùng nhưng giữ thứ tự xuất hiện để đảm bảo kết quả ổn định.
+    return tuple(dict.fromkeys(tokens))
 
 # Lớp lưu trữ các tín hiệu liên quan đến khách sạn được sử dụng trong quá trình xếp hạng.
 @dataclass(frozen=True)
@@ -233,8 +284,8 @@ class HotelRankingService:
         user_weights: ScoringWeights | None,
         profile: UserTravelPreference,
         trip_criteria: TripSearchCriteria | None,
-        collections: list[CollectionPublic],
-        history: list[UserBehaviorEvent],
+        collections: list[CollectionDocument],
+        history: list[UserBehaviorEventDocument],
         weather: list[WeatherInfo] | None,
     ) -> ScoringWeights:
         if user_weights:
@@ -307,8 +358,8 @@ class HotelRankingService:
         signal: HotelSignal,
         profile: UserTravelPreference,
         trip_criteria: TripSearchCriteria | None,
-        collections: list[CollectionPublic],
-        history: list[UserBehaviorEvent],
+        collections: list[CollectionDocument],
+        history: list[UserBehaviorEventDocument],
         weather: list[WeatherInfo] | None,
         weights: ScoringWeights,
     ) -> dict[str, float]:
@@ -431,7 +482,7 @@ class HotelRankingService:
         return self._blend_rule_and_semantic(rule_score, semantic_score)
     
     # Chấm mức hợp với bộ sưu tập đã lưu của người dùng.
-    def _collection_affinity_score(self, signal: HotelSignal, collections: list[CollectionPublic]) -> float:
+    def _collection_affinity_score(self, signal: HotelSignal, collections: list[CollectionDocument]) -> float:
         if not collections:
             return 0.5
 
@@ -440,8 +491,8 @@ class HotelRankingService:
         for collection in collections:
             collection_tokens = self._collection_tokens(collection)
             exact_match = any(
-                self._normalize_token(getattr(place, "place_id", "")) == signal.identity
-                for place in collection.places
+                self._normalize_token(pid) == signal.identity
+                for pid in (collection.place_ids or [])
             )
             if exact_match:
                 scores.append(1.0)
@@ -459,7 +510,7 @@ class HotelRankingService:
         return self._blend_rule_and_semantic(rule_score, semantic_score)
     
     # Chấm mức hợp với lịch sử xem/lưu/xóa place hoặc collection.
-    def _history_affinity_score(self, signal: HotelSignal, history: list[UserBehaviorEvent]) -> float:
+    def _history_affinity_score(self, signal: HotelSignal, history: list[UserBehaviorEventDocument]) -> float:
         if not history:
             return 0.5
 
@@ -580,7 +631,7 @@ class HotelRankingService:
     
     # So khớp ghi chú tự do của user với khách sạn.
     def _free_text_match_score(self, note: str, hotel: DiscoverHotel) -> float:
-        tokens = self._tokenize(note)
+        tokens = self._tokenize(note, use_model_tokens=True)
         hotel_tokens = self._hotel_feature_tokens(hotel)
         if not tokens:
             return 0.5
@@ -589,9 +640,9 @@ class HotelRankingService:
     def _hotel_feature_tokens(self, hotel: DiscoverHotel) -> set[str]:
         # Lấy token đặc trưng của khách sạn, không tính điểm gần đó.
         tokens = set(self._tokenize(hotel.name))
-        tokens.update(self._tokenize(hotel.description or ""))
+        tokens.update(self._tokenize(hotel.description or "", use_model_tokens=True))
         tokens.update(self._tokenize(hotel.address or ""))
-        tokens.update(self._tokenize(hotel.deal or ""))
+        tokens.update(self._tokenize(hotel.deal or "", use_model_tokens=True))
         tokens.update(self._tokenize(" ".join(hotel.amenities)))
         return tokens
 
@@ -601,27 +652,26 @@ class HotelRankingService:
         for nearby_place in hotel.nearby_places:
             tags.update(self._tokenize(nearby_place.category or ""))
             tags.update(self._tokenize(nearby_place.name))
-            tags.update(self._tokenize(nearby_place.description or ""))
+            tags.update(self._tokenize(nearby_place.description or "", use_model_tokens=True))
         if hotel.address:
             tags.update(self._tokenize(hotel.address))
         return tags
 
-    def _collection_tokens(self, collection: CollectionPublic) -> set[str]:
+    def _collection_tokens(self, collection: CollectionDocument) -> set[str]:
         # Lấy token đặc trưng từ bộ sưu tập.
         tokens = set(self._tokenize(collection.name))
-        tokens.update(self._tokenize(collection.description or ""))
+        tokens.update(self._tokenize(collection.description or "", use_model_tokens=True))
         tokens.update(self._tokenize(" ".join(collection.tags)))
-        for place in collection.places:
-            place_id = getattr(place, "place_id", "")
+        for place_id in (collection.place_ids or []):
             if place_id:
                 tokens.update(self._tokenize(place_id))
         return tokens
 
-    def _event_tokens(self, event: UserBehaviorEvent) -> set[str]:
+    def _event_tokens(self, event: UserBehaviorEventDocument) -> set[str]:
         # Lấy token từ một sự kiện hành vi.
         tokens = set(self._tokenize(event.target_name or ""))
         tokens.update(self._tokenize(event.target_id or ""))
-        tokens.update(self._tokenize(" ".join(event.metadata.values())))
+        tokens.update(self._tokenize(" ".join(event.metadata.values()), use_model_tokens=True))
         return tokens
 
     # Chuẩn hoá và mở rộng token tiện ích (có cả cụm từ + đồng nghĩa).
@@ -822,7 +872,7 @@ class HotelRankingService:
         ]
         return " | ".join(part for part in parts if part)
     
-    def _collections_semantic_text(self, collections: list[CollectionPublic]) -> str:
+    def _collections_semantic_text(self, collections: list[CollectionDocument]) -> str:
         # Ghép text từ các bộ sưu tập đã lưu.
         parts: list[str] = []
         for collection in collections[:10]:
@@ -831,14 +881,13 @@ class HotelRankingService:
                 parts.append(f"mo_ta_bo_suu_tap: {collection.description}")
             if collection.tags:
                 parts.append(f"tag: {'; '.join(collection.tags)}")
-            if collection.places:
-                place_ids = [getattr(place, "place_id", "") for place in collection.places]
-                place_ids = [place_id for place_id in place_ids if place_id]
+            if collection.place_ids:
+                place_ids = [pid for pid in collection.place_ids if pid]
                 if place_ids:
                     parts.append(f"dia_diem_da_luu: {'; '.join(place_ids)}")
         return " | ".join(parts)
 
-    def _history_semantic_text(self, history: list[UserBehaviorEvent]) -> str:
+    def _history_semantic_text(self, history: list[UserBehaviorEventDocument]) -> str:
         # Ghép text từ lịch sử hành vi.
         parts: list[str] = []
         for event in history[:30]:
@@ -869,8 +918,8 @@ class HotelRankingService:
         return self._clamp((0.65 * rule_score) + (0.35 * semantic_score), 0.0, 1.0)
 
     # Bọc lại hàm tokenize cho gọn.
-    def _tokenize(self, text: str) -> list[str]:
-        return list(tokenize_text(text))
+    def _tokenize(self, text: str, use_model_tokens: bool = False) -> list[str]:
+        return list(tokenize_text(text, use_model_tokens))
 
     # Bọc lại hàm normalize cho gọn.
     def _normalize_token(self, text: str) -> str:
@@ -895,8 +944,8 @@ class HotelRankingService:
             return places
 
         profile = UserTravelPreference()
-        collections: list[CollectionPublic] = []
-        history: list[UserBehaviorEvent] = []
+        collections: list[CollectionDocument] = []
+        history: list[UserBehaviorEventDocument] = []
         scoring_weights: ScoringWeights | None = None
 
         if requester_uid:
@@ -905,7 +954,7 @@ class HotelRankingService:
                 if not private_user:
                     private_user = {}
 
-                profile_data = private_user.get("travel_profile")
+                profile_data = getattr(private_user, "travel_profile", None)
                 if isinstance(profile_data, UserTravelPreference):
                     profile = profile_data
                 elif isinstance(profile_data, dict):
@@ -914,31 +963,33 @@ class HotelRankingService:
                     except Exception:
                         profile = UserTravelPreference()
 
-                # Fetch collections from collection repository
-                try:
-                    repo_cols = await collection_repo.get_owned_collections(requester_uid, limit=30)
-                    parsed_collections: list[CollectionPublic] = []
-                    for c in repo_cols:
-                        try:
-                            parsed_collections.append(CollectionPublic.model_validate(c))
-                        except Exception:
-                            continue
-                    collections = parsed_collections
-                except Exception as exc:
-                    logger.warning(f"Failed to fetch collections for {requester_uid}: {str(exc)}")
-                    collections = []
+                collection_data = getattr(private_user, "collections", [])
+                if isinstance(collection_data, list):
+                    parsed_collections: list[CollectionDocument] = []
+                    for item in collection_data:
+                        if isinstance(item, CollectionDocument):
+                            parsed_collections.append(item)
+                        elif isinstance(item, dict):
+                            try:
+                                parsed_collections.append(CollectionDocument.model_validate(item))
+                            except Exception:
+                                continue
+                    collections = parsed_collections[:50]
 
-                # Fetch user behavior history from behavior_service
-                try:
-                    history = await behavior_service.get_recent_events(
-                        requester_uid,
-                        limit=30,
-                    )
-                except Exception as exc:
-                    logger.warning(f"Failed to fetch behavior history for {requester_uid}: {str(exc)}")
-                    history = []
+                history_data = getattr(private_user, "user_behavior_history", [])
+                if isinstance(history_data, list):
+                    parsed_history: list[UserBehaviorEventDocument] = []
+                    for event in history_data:
+                        if isinstance(event, UserBehaviorEventDocument):
+                            parsed_history.append(event)
+                        elif isinstance(event, dict):
+                            try:
+                                parsed_history.append(UserBehaviorEventDocument.model_validate(event))
+                            except Exception:
+                                continue
+                    history = parsed_history[:100]
 
-                weight_data = private_user.get("scoring_weights")
+                weight_data = getattr(private_user, "scoring_weights", None)
                 if isinstance(weight_data, ScoringWeights):
                     scoring_weights = weight_data
                 elif isinstance(weight_data, dict):
