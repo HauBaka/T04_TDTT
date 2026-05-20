@@ -36,14 +36,18 @@ class DiscoverRequest(BaseModel):
     # Thêm ràng buộc
     @model_validator(mode="after")
     def validate_cross_fields(self) -> "DiscoverRequest":
-        # Đổi timezone của check_in và check_out về UTC để so sánh chính xác hơn
-        self.check_in = self.check_in.astimezone(timezone.utc)
-        self.check_out = self.check_out.astimezone(timezone.utc)
-        # 1. Ràng buộc ngày tháng: today <= check_in < check_out
-        if self.check_in < datetime.now(timezone.utc):
+        check_in_utc = self.check_in.astimezone(timezone.utc)
+        check_out_utc = self.check_out.astimezone(timezone.utc)
+
+        check_in_date = check_in_utc.date()
+        check_out_date = check_out_utc.date()
+        today_date = datetime.now(timezone.utc).date()
+
+        if check_in_date < today_date:
             raise ValueError("check_in must be today or later.")
 
-        if self.check_in >= self.check_out:
+        # Ràng buộc: check_in < check_out
+        if check_in_date > check_out_date:
             raise ValueError("check_in must be before check_out.")
 
         # 2. Ràng buộc giá: min_price < max_price
@@ -84,6 +88,11 @@ class GetHotelDetailsRequest(BaseModel):
 class UserReview(BaseModel):
     text: str
     raw_stars: float
+    sentiment_score: float | None = None  # Điểm do PhoBERT chấm
+    trust_weight: float | None = None  # Trọng số tin cậy của review (0.0 -> 1.0)
+    adjusted_stars: float | None = (
+        None  # Điểm sau khi đối soát (kết hợp raw_stars và sentiment_score)
+    )
 
 
 # Review sau khi phân tích cảm xúc

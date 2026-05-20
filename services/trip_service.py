@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from loguru import logger
 
 from core.exceptions import (
@@ -9,6 +11,11 @@ from core.exceptions import (
 from repositories.hotel_repo import hotel_repo
 from repositories.trip_repo import trip_repo
 from repositories.user_repo import user_repo
+from schemas.invitation_schema import (
+    InvitationCreateRequest,
+    InvitationResponse,
+    InvitationType,
+)
 from schemas.response_schema import ResponseSchema
 from schemas.trip_schema import (
     TripCreateRequest,
@@ -124,44 +131,119 @@ class TripService:
         await self.trip_repo.delete(trip_id)
         return ResponseSchema(data=True)
 
-    async def add_members_to_trip(
-        self, trip_id: str, requester_uid: str, member_uids: list[str]
-    ) -> ResponseSchema[TripResponse]:
-        """Thêm nhiều thành viên vào một trip."""
+    async def send_invitations(
+        self, trip_id: str, requester_uid: str, target_uids: list[str]
+    ) -> ResponseSchema[list[InvitationResponse]]:
+        from services.invitation_service import invitation_service
+
         trip = await self.trip_repo.get_by_id(trip_id)
-        # Chỉ được phép thêm khi trip đang ở trạng thái WAITING
+
         if trip.status != TripStatus.WAITING:
             raise BadRequestError(
-                message=f"Cannot add members. Trip is currently in '{trip.status.value}' status, expected 'waiting'."
+                message="Cannot add members. Trip is currently in '{trip.status.value}' status, expected 'waiting'."
             )
 
-        # Chỉ member mới được thêm thành viên khác vào trip
         if requester_uid not in trip.member_uids:
             raise PermissionDeniedError(message="You must be a member to add others.")
 
-        # Loại bỏ những UID đã là member để tránh lỗi khi thêm trùng
-        new_member_uids = [uid for uid in member_uids if uid not in trip.member_uids]
+        new_member_uids = [uid for uid in target_uids if uid not in trip.member_uids]
         if not new_member_uids:
             raise PermissionDeniedError(message="All members are already in this trip.")
 
-        # Kiểm tra thông tin của các UID mới trước khi thêm
         users_info = await self.user_repo.get_users(new_member_uids)
+        member_to_add = []
 
-        members_to_add = []
         for uid in new_member_uids:
             user_info = users_info.get(uid)
             if not user_info:
                 raise NotFoundError(f"User {uid} not found in system.")
 
-            # kiểm tra đảm bảo các user chuẩn bị thêm chưa tham gia trip nào khác
             if user_info.current_trip:
                 raise BadRequestError(
                     message=f"User {user_info.display_name} is already in a trip."
                 )
 
-            members_to_add.append(uid)
+            member_to_add.append(uid)
 
-        updated_trip = await self.trip_repo.add_members(trip_id, members_to_add)
+        expired_at = self.trip_repo._current_timestamp + timedelta(days=7)
+        invitation = await invitation_service.send_batch_invitations(
+            [
+                InvitationCreateRequest(
+                    sender_uid=requester_uid,
+                    target_uid=uid,
+                    type=InvitationType.TRIP,
+                    ref_id=trip_id,
+                    expired_at=expired_at,
+                )
+                for uid in member_to_add
+            ]
+        )
+
+        return ResponseSchema(data=invitation)
+
+    async def add_members_to_trip(
+        self, trip_id: str, requester_uid: str, member_uids: list[str]
+    ) -> ResponseSchema[TripResponse]:
+        """Thêm nhiều thành viên vào một trip."""
+        await self.send_invitations(
+            trip_id=trip_id, requester_uid=requester_uid, target_uids=member_uids
+        )
+        trip = await self.trip_repo.get_by_id(trip_id)
+        # Chỉ được phép thêm khi trip đang ở trạng thái WAITING
+        # if trip.status != TripStatus.WAITING:
+        #     raise BadRequestError(
+        #         message=f"Cannot add members. Trip is currently in '{trip.status.value}' status, expected 'waiting'."
+        #     )
+
+        # Chỉ member mới được thêm thành viên khác vào trip
+        # if requester_uid not in trip.member_uids:
+        #    raise PermissionDeniedError(message="You must be a member to add others.")
+
+        # Loại bỏ những UID đã là member để tránh lỗi khi thêm trùng
+        # new_member_uids = [uid for uid in member_uids if uid not in trip.member_uids]
+        # if not new_member_uids:
+        #    raise PermissionDeniedError(message="All members are already in this trip.")
+
+        # Kiểm tra thông tin của các UID mới trước khi thêm
+        # users_info = await self.user_repo.get_users(new_member_uids)
+
+        # members_to_add = []
+        # for uid in new_member_uids:
+        #    user_info = users_info.get(uid)
+        #    if not user_info:
+        #        raise NotFoundError(f"User {uid} not found in system.")
+        #
+        # kiểm tra đảm bảo các user chuẩn bị thêm chưa tham gia trip nào khác
+        #    if user_info.current_trip:
+        #        raise BadRequestError(message=f"User {user_info.display_name} is already in a trip.")
+
+        #    members_to_add.append(uid)
+
+        # updated_trip = await self.trip_repo.add_members(trip_id, members_to_add)
+
+        return await self._build_trip_response(trip)
+
+    async def add_accepted_member(
+        self, trip_id: str, member_uid: str
+    ) -> ResponseSchema[TripResponse]:
+        """Thêm thành viên vào trip sau khi họ đã chấp nhận lời mời."""
+        trip = await self.trip_repo.get_by_id(trip_id)
+
+        if member_uid in trip.member_uids:
+            raise BadRequestError(message="You are already a member of this trip.")
+
+        user_info = await self.user_repo.get_user(member_uid)
+        if user_info.current_trip:
+            raise BadRequestError(
+                message=f"User {user_info.display_name} is already in another trip."
+            )
+
+        if trip.status != TripStatus.WAITING:
+            raise BadRequestError(
+                message=f"Cannot add member. Trip is currently in '{trip.status.value}' status, expected 'waiting'."
+            )
+
+        updated_trip = await self.trip_repo.add_members(trip_id, [member_uid])
 
         return await self._build_trip_response(updated_trip)
 

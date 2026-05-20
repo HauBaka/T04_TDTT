@@ -7,6 +7,7 @@ from schemas.discover_schema import (
     DiscoverHotel,
     DiscoverRequest,
     HotelSuggestionRequest,
+    DiscoverResponse,
 )
 from schemas.response_schema import GPSCoordinates, ResponseSchema
 from services.discover_service import DiscoverService
@@ -14,7 +15,7 @@ from services.discover_service import DiscoverService
 discover_router = APIRouter()
 
 
-@discover_router.post("/discover", response_model=ResponseSchema)
+@discover_router.post("/discover", response_model=ResponseSchema[DiscoverResponse])
 async def perform(payload: DiscoverRequest):
     """Tìm lodgings"""
     try:

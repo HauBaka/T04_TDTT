@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from enum import Enum
 
 from pydantic import BaseModel, Field
+
 
 # Mức độ chịu đựng thời tiết xấu của người dùng
 class WeatherTolerance(str, Enum):
@@ -11,14 +11,6 @@ class WeatherTolerance(str, Enum):
     MEDIUM = "trung_binh"
     HIGH = "cao"
 
-# Các sự kiện hành vi của người dùng có thể ghi nhận để cải thiện cá nhân hóa
-class UserEventType(str, Enum):
-    VIEW = "xem"
-    CLICK = "nhan"
-    SAVE = "luu"
-    REMOVE = "xoa"
-    BOOK = "dat_phong"
-    RATE = "danh_gia"
 
 # Schema lưu trữ sở thích bền vững của người dùng (lấy từ form)
 class UserTravelPreference(BaseModel):
@@ -30,15 +22,6 @@ class UserTravelPreference(BaseModel):
     disliked_location_tags: list[str] = Field(default_factory=list)
     notes: str | None = None
 
-# Schema lưu trữ các sự kiện hành vi của người dùng
-class UserBehaviorEvent(BaseModel):
-    event_type: UserEventType
-    hotel_id: str | None = None
-    hotel_name: str | None = None
-    collection_id: str | None = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    value: float | None = None
-    metadata: dict[str, str] = Field(default_factory=dict)
 
 # Trọng số các yếu tố khi tính điểm cá nhân hóa
 class ScoringWeights(BaseModel):
@@ -52,6 +35,7 @@ class ScoringWeights(BaseModel):
 
 class UserTravelPreferenceUpdateRequest(BaseModel):
     """Schema dùng cho request tạo / cập nhật preference (tất cả trường optional để dễ partial update)."""
+
     weather_tolerance: WeatherTolerance | None = None
     preferred_amenities: list[str] | None = None
     must_have_amenities: list[str] | None = None

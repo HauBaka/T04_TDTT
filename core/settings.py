@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     SERP_API_KEY: SecretStr
     GEMINI_API_KEY: SecretStr
     VIETMAP_API_KEY: SecretStr
+    GROQ_API_KEY: SecretStr
     GEOHASH_PRECISION: int = 5
 
     HOTEL_DATA_EXPIRE_DAYS: int = 30

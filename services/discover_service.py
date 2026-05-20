@@ -1,33 +1,30 @@
-from loguru import logger
-
 from core.exceptions import AppException, NotFoundError
-from externals.SerpAPI import serp_api
-from externals.VietMapAPI import vietmap_api
-from mock_data.virtual_review import virtual_review_manager
-from repositories.hotel_repo import hotel_repo
 from schemas.discover_schema import (
     AddressSuggestion,
     AddressSuggestionRequest,
     AddressSuggestionResponse,
-    DiscoverHotel,
     DiscoverRequest,
+    DiscoverHotel,
     DiscoverResponse,
+    WeatherInfo,
 )
 from schemas.response_schema import GPSCoordinates, ResponseSchema
-
-# from services.hotel_ranking_service import hotel_ranking_service
+from services.weather_service import weather_service
+from services.hotel_ranking_service import hotel_ranking_service
+from services.discover_background_worker import discover_background_worker
+from mock_data.virtual_review import virtual_review_manager
+from loguru import logger
+from externals.SerpAPI import serp_api
+from externals.VietMapAPI import vietmap_api
+from repositories.hotel_repo import hotel_repo
 from schemas.vietmap_schema import AutoCompleteResult
-from services.sentiment_service import sentiment_service
 from utils.haversine_distance import haversine_distance
-
-# from services.weather_service import weather_service
 
 
 class DiscoverService:
     def __init__(self, payload: DiscoverRequest, requester_uid: str | None = None):
         self.payload = payload
         self.requester_uid = requester_uid
-        self.sentiment_service = sentiment_service
         self.searching_place: AutoCompleteResult | None = None
 
     async def raw_search(self) -> list[DiscoverHotel]:
@@ -59,10 +56,18 @@ class DiscoverService:
             if (
                 place_detail
                 and place_detail.result
-                and place_detail.result.gps_coordinates
             ):
-                gps_coordinates = place_detail.result.gps_coordinates
+                if place_detail.result.gps_coordinates:
+                    gps_coordinates = place_detail.result.gps_coordinates
                 self.payload.address = place_detail.result.name
+                
+                self.searching_place = AutoCompleteResult(
+                    name=place_detail.result.name,
+                    address=place_detail.result.address,
+                    display=place_detail.result.display,
+                    ref_id=self.payload.ref_id,
+                    gps=place_detail.result.gps_coordinates,
+                )
         else:  # Tìm dựa trên address được nhập
             autocomplete_result = await vietmap_api.autocomplete(
                 self.payload.address, self.payload.gps
@@ -70,19 +75,28 @@ class DiscoverService:
             if autocomplete_result and autocomplete_result.data:
                 # Ko có gps ng dùng thì lấy cái đầu
                 self.payload.address = autocomplete_result.data[0].display
-                self.searching_place = autocomplete_result.data[0]
-
+                
                 place_detail = await vietmap_api.get_place_details(
                     autocomplete_result.data[0].ref_id
                 )
                 if (
                     place_detail
                     and place_detail.result
-                    and place_detail.result.gps_coordinates
                 ):
-                    gps_coordinates = (
-                        place_detail.result.gps_coordinates
-                    )  # ưu tiên GPS từ autocomplete nếu có
+                    if place_detail.result.gps_coordinates:
+                        gps_coordinates = place_detail.result.gps_coordinates
+                        
+                    self.searching_place = AutoCompleteResult(
+                        name=place_detail.result.name,
+                        address=place_detail.result.address,
+                        display=place_detail.result.display,
+                        ref_id=autocomplete_result.data[0].ref_id,
+                        distance=autocomplete_result.data[0].distance,
+                        gps=place_detail.result.gps_coordinates,
+                    )
+                else:
+                    # Fallback nếu không lấy được detail
+                    self.searching_place = autocomplete_result.data[0]
 
         # Lấy trong database
         raw_results = (
@@ -114,42 +128,34 @@ class DiscoverService:
         raw_results = list(hotel_dict.values())
 
         await self.get_reviews(raw_results)
-        await self.sentiment_service.process_places_real_rating(raw_results)
+        
+        weather_by_identity: dict[str, list[WeatherInfo]] = {}
+        try:
+            destination_gps = gps_coordinates or self.payload.gps
+            weather_by_identity = await weather_service.build_weather_context(
+                raw_results,
+                self.payload.check_in,
+                self.payload.check_out,
+                destination_gps=destination_gps,
+            )
+        except Exception as exc:
+            logger.warning(f"Không xây dựng được weather context cho pipeline: {str(exc)}")
 
-        # weather_by_identity: dict[str, list[WeatherInfo]] = {}
-        # try:
-        #     destination_gps = gps_coordinates or self.payload.gps
-        #     weather_by_identity = await weather_service.build_weather_context(
-        #         raw_results,
-        #         self.payload.check_in,
-        #         self.payload.check_out,
-        #         destination_gps=destination_gps,
-        #     )
-        # except Exception as exc:
-        #     logger.warning(
-        #         f"Không xây dựng được weather context cho pipeline: {str(exc)}"
-        #     )
+        raw_results = await hotel_ranking_service.rank_discovered_hotels(
+            raw_results,
+            self.payload,
+            weather_by_identity=weather_by_identity,
+            requester_uid=self.requester_uid,
+        )
 
-        # raw_results = await hotel_ranking_service.rank_discovered_hotels(
-        #     raw_results,
-        #     self.payload,
-        #     weather_by_identity=weather_by_identity,
-        #     requester_uid=self.requester_uid,
-        # )
-        # await summary_service.process_places_ai_summary(raw_results, weather_by_identity=weather_by_identity) XXX: quá nghèo để có thể gọi AI Summary, tạm thời để sau
-        # Chạy ngầm
-
-        # await asyncio.gather(
-        #     # hotel_repo.sync_hotels_background(raw_results),
-        #     self._detail_searching_place(),
-        #     self._calculate_distance_for_results(raw_results),
-        # )
-
-        await self._detail_searching_place()
+        enqueued = discover_background_worker.enqueue(raw_results, weather_by_identity)
+        if not enqueued:
+            logger.warning("Discover background worker enqueue returned False")
+        
         await self._calculate_distance_for_results(raw_results)
 
         return DiscoverResponse(searching_place=self.searching_place, data=raw_results)
-
+    
     @staticmethod
     async def suggest_addresses(
         query: AddressSuggestionRequest,
@@ -217,28 +223,7 @@ class DiscoverService:
 
         return ResponseSchema(data=hotel_detail)
 
-    async def _detail_searching_place(self):
-        if self.searching_place and self.searching_place.ref_id:
-            try:
-                place_detail = await vietmap_api.get_place_details(
-                    self.searching_place.ref_id
-                )
 
-                if place_detail and place_detail.result:
-                    self.searching_place = AutoCompleteResult(
-                        name=place_detail.result.name,
-                        address=place_detail.result.address,
-                        display=place_detail.result.display,
-                        ref_id=self.searching_place.ref_id,
-                        distance=self.searching_place.distance,
-                        gps=place_detail.result.gps_coordinates,
-                    )
-
-            except Exception as exc:
-                logger.error(
-                    f"Error in detail_searching_place "
-                    f"for ref_id {self.searching_place.ref_id}: {exc}"
-                )
 
     async def _calculate_distance_for_results(self, hotels: list[DiscoverHotel]):
         """Tính khoảng cách từ searching_place đến từng hotel
