@@ -1,3 +1,4 @@
+from schemas.user_preference_schema import UserTravelPreferenceResponse, UserTravelPreference, UserTravelPreferenceUpdateRequest
 import asyncio
 from typing import cast
 
@@ -441,5 +442,58 @@ class UserService:
             data=[to_preview(doc) for doc in suggested_users],
         )
 
+
+    async def get_travel_preference(self, uid: str) -> ResponseSchema[UserTravelPreferenceResponse]:
+        """Lấy travel_profile của user."""
+        preference_data = await self.user_repo.get_travel_preference(uid)
+
+        return ResponseSchema(
+            status_code=200,
+            message="Travel preference retrieved successfully",
+            data=UserTravelPreferenceResponse(preference=preference_data)
+        )
+
+    async def update_travel_preference(
+        self,
+        uid: str,
+        preference: UserTravelPreferenceUpdateRequest,
+    ) -> ResponseSchema[UserTravelPreferenceResponse]:
+        """Tạo mới/cập nhật travel_profile cho user."""
+        update_data = preference.model_dump(exclude_unset=True)
+        if not update_data:
+            raise BadRequestError("No travel preference fields provided for update")
+
+        try:
+            existing_preference = await self.user_repo.get_travel_preference(uid)
+            # Merge existing with update data
+            merged_data = existing_preference.model_dump()
+            merged_data.update(update_data)
+            update_request = UserTravelPreferenceUpdateRequest.model_validate(merged_data)
+        except NotFoundError:
+            # User không tồn tại hoặc chưa có preference, tạo mới
+            update_request = preference
+
+        try:
+            updated_preference = await self.user_repo.update_travel_preference(uid, update_request)
+        except NotFoundError:
+            raise NotFoundError("User not found")
+
+        return ResponseSchema(
+            status_code=200,
+            message="Travel preference updated successfully",
+            data=UserTravelPreferenceResponse(preference=updated_preference)
+        )
+
+    async def delete_travel_preference(self, uid: str) -> ResponseSchema[bool]:
+        """Xóa travel_profile của user."""
+        deleted = await self.user_repo.delete_travel_preference(uid)
+        # if not deleted:
+        #     raise NotFoundError("User not found or preference could not be deleted")
+
+        return ResponseSchema(
+            status_code=200,
+            message="Travel preference deleted successfully",
+            data=deleted
+        )
 
 user_service = UserService()
