@@ -1,11 +1,12 @@
 from typing import Optional
 
+from core.cache import cache_delete
 from core.exceptions import NotFoundError, ValidationError
 from repositories.user_repo import user_repo
 from repositories.base_repo import BaseRepository
 from google.cloud import firestore
 
-from schemas.conversation_schema import ConversationCreateRequest, ConversationDocument, ConversationMemberDocument, ConversationMemberResponse, ConversationMessageDocument, ConversationRole, ConversationUpdateRequest, SendMessageRequest, UserConversationSummaryUpdate
+from schemas.conversation_schema import ConversationCreateRequest, ConversationDocument, ConversationMemberDocument, ConversationMemberResponse, ConversationMessageDocument, ConversationRole, ConversationUpdateRequest, SendMessageRequest, SystemSendMessageRequest, UserConversationSummaryUpdate
 
 from pydantic import ValidationError as PydanticValidationError
 from loguru import logger
@@ -94,6 +95,8 @@ class ConversationRepository(BaseRepository):
 
         # Gửi toàn bộ cái batch đi
         await self._commit_batch(batch)
+        # Xoá cache để đảm bảo dữ liệu mới nhất được trả về ở lần truy vấn tiếp theo
+        await cache_delete(self._build_cache_key("id", conversation_id)) 
         
         return await self.get_by_id(conversation_id)  
     
@@ -107,10 +110,11 @@ class ConversationRepository(BaseRepository):
             batch.delete(doc_ref.collection("members").document(uid))
         
         await self._commit_batch(batch)
+        await cache_delete(self._build_cache_key("id", conversation_id))
 
         return await self.get_by_id(conversation_id)
     
-    async def send_message(self, conversation_id: str, sender_uid: str, message_data: SendMessageRequest) -> ConversationMessageDocument:
+    async def send_message(self, conversation_id: str, sender_uid: str, message_data: SendMessageRequest | SystemSendMessageRequest) -> ConversationMessageDocument:
         """Gửi một tin nhắn mới vào một conversation."""
         """Lưu tin nhắn vào sub-collection 'messages' bên trong hội thoại."""
         msg_ref = self._collection.document(conversation_id).collection("messages").document()
@@ -140,7 +144,7 @@ class ConversationRepository(BaseRepository):
         await self._delete_subcollection(conv_ref.collection("messages"))
         await self._delete_subcollection(conv_ref.collection("members"))
         # Xóa doc chính
-        await conv_ref.delete()
+        await self._delete(conversation_id)
         return True
     
     async def get_recent_messages(self, conversation_id: str, limit: int = 20) -> list[ConversationMessageDocument]:

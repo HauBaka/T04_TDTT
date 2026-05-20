@@ -40,6 +40,10 @@ class SendMessageRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=2000, description="Nội dung tin nhắn. Tối đa 2000 ký tự.")
     attachments: list[ConversationMessageAttachment] = Field(default_factory=list, min_length=0, max_length=5, description="Danh sách các tệp đính kèm cho tin nhắn. Tối đa 5 tệp đính kèm mỗi tin nhắn.")
     
+class SystemSendMessageRequest(BaseModel):
+    content: str = Field(..., min_length=1, max_length=20000, description="Nội dung tin nhắn hệ thống. Tối đa 20000 ký tự.")
+    attachments: list[ConversationMessageAttachment] = Field(default_factory=list, min_length=0, max_length=5, description="Danh sách các tệp đính kèm cho tin nhắn hệ thống. Tối đa 5 tệp đính kèm mỗi tin nhắn.")
+
 # --- DOCUMENTS
 class ConversationMemberDocument(BaseModel):
     uid: str

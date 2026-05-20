@@ -244,6 +244,8 @@ class CollectionRepository(BaseRepository):
             },
         )
         await batch.commit()
+        # Xoá cache để đảm bảo dữ liệu mới nhất được trả về ở lần truy vấn tiếp theo
+        await cache_delete(self._build_cache_key("id", collection_id)) 
 
         return await self.get_collection(collection_id)
 
@@ -266,6 +268,7 @@ class CollectionRepository(BaseRepository):
         )
         await batch.commit()
 
+        await cache_delete(self._build_cache_key("id", collection_id))
         return await self.get_collection(collection_id)
 
     async def add_places_to_collection(
@@ -314,6 +317,7 @@ class CollectionRepository(BaseRepository):
         )
 
         await self._commit_batch(batch)
+        await cache_delete(self._build_cache_key("id", collection_id))
         return await self.get_collection(collection_id)
 
     async def get_places_from_collection(
@@ -420,6 +424,7 @@ class CollectionRepository(BaseRepository):
         )
 
         await self._commit_batch(batch)
+        await cache_delete(self._build_cache_key("id", collection_id))
         return await self.get_collection(collection_id)
 
     async def add_contributors_to_collection(
@@ -467,6 +472,7 @@ class CollectionRepository(BaseRepository):
         )
 
         await self._commit_batch(batch)
+        await cache_delete(self._build_cache_key("id", collection_id))
         return await self.get_collection(collection_id)
 
     async def get_contributors_from_collection(
@@ -542,6 +548,7 @@ class CollectionRepository(BaseRepository):
         )
 
         await self._commit_batch(batch)
+        await cache_delete(self._build_cache_key("id", collection_id))
         return await self.get_collection(collection_id)
 
     async def add_tags_to_collection(
@@ -557,6 +564,7 @@ class CollectionRepository(BaseRepository):
         }
 
         await ref.update(update_payload)
+        await cache_delete(self._build_cache_key("id", collection_id))
         return await self.get_collection(collection_id)
 
     async def remove_tags_from_collection(
@@ -572,6 +580,7 @@ class CollectionRepository(BaseRepository):
         }
 
         await ref.update(update_payload)
+        await cache_delete(self._build_cache_key("id", collection_id))
         return await self.get_collection(collection_id)
 
     # TODO: Chuyển 3 cái get này sang user_repo

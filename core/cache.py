@@ -1,5 +1,7 @@
+from collections.abc import Mapping
 from datetime import date, datetime
 from typing import Any
+from google.cloud.firestore_v1.transforms import Increment
 
 import orjson
 from loguru import logger
@@ -140,6 +142,55 @@ async def cache_delete(*keys: str) -> None:
 
     except Exception:
         logger.exception(f"Redis DELETE failed: {keys}")
+
+
+
+def deep_update(target: dict, updates: dict) -> dict:
+    for key, value in updates.items():
+        parts = key.split(".")
+        current = target
+
+        for part in parts[:-1]:
+            if part not in current or not isinstance(current[part], dict):
+                current[part] = {}
+
+            current = current[part]
+
+        final_key = parts[-1]
+
+        # Handle Firestore Increment
+        if isinstance(value, Increment):
+            old_value = current.get(final_key, 0)
+            current[final_key] = old_value + value.value
+        else:
+            current[final_key] = value
+
+    return target
+
+
+async def cache_update_fields(
+    key: str,
+    updates: dict,
+    ttl_seconds: int = 60,
+) -> None:
+    try:
+        cached = await cache_get(key)
+        if cached is None:
+            return
+
+        if not isinstance(cached, dict):
+            return
+
+        updated = deep_update(cached, updates)
+        await cache_set(
+            key,
+            updated,
+            ttl_seconds=ttl_seconds,
+        )
+
+        _debug(f"[CACHE UPDATE FIELDS] {key}")
+    except Exception:
+        logger.exception(f"Cache update fields failed: {key} with {updates}")
 
 
 def serialize_cache_value(value: Any) -> Any:

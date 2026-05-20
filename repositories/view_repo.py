@@ -2,7 +2,9 @@ from datetime import timedelta
 
 from google.cloud import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
+from loguru import logger
 
+from core.cache import cache_key, cache_update_fields
 from repositories.base_repo import BaseRepository
 from schemas.collection_schema import CollectionDocument, CollectionVisibility
 from schemas.discover_schema import HotelDocument
@@ -82,6 +84,15 @@ class ViewRepository(BaseRepository):
         batch.update(target_ref, update_data)
 
         await batch.commit()
+        logger.debug(
+            f"Added view for {target_type.value} {target_id} by user {viewer_id}"
+        )
+        logger.debug(cache_key(target_type.value.lower(), "id", doc_id))
+        await cache_update_fields(
+            cache_key(target_type.value.lower(), "id", target_id),
+            update_data,
+        )
+
 
     async def get_top_views(
         self,

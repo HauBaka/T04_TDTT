@@ -2,6 +2,7 @@ import asyncio
 from loguru import logger
 from pydantic import ValidationError as PydanticValidationError
 from google.cloud import firestore
+from core.cache import cache_delete
 from core.exceptions import InternalServerError, ValidationError
 from repositories.base_repo import BaseRepository
 from schemas.trip_schema import TripCreateRequest, TripDocument, TripMemberDocument, TripStatus, TripUpdateRequest
@@ -88,6 +89,8 @@ class TripRepository(BaseRepository):
             batch.update(user_ref, {"current_trip": trip_id})
 
         await self._commit_batch(batch)
+        # Xoá cache để đảm bảo dữ liệu mới nhất được trả về ở lần truy vấn tiếp theo
+        await cache_delete(self._build_cache_key("id", trip_id))
         return await self.get_by_id(trip_id)
         
     async def remove_members(self, trip_id: str, uids: list[str]) -> TripDocument:
@@ -118,7 +121,7 @@ class TripRepository(BaseRepository):
             batch.update(user_ref, {"current_trip": None})
 
         await self._commit_batch(batch)
-
+        await cache_delete(self._build_cache_key("id", trip_id))
         return await self.get_by_id(trip_id)
         
     async def update_members(self, trip_id: str, updates_data: dict[str, dict]) -> list[TripMemberDocument]:

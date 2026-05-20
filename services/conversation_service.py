@@ -11,6 +11,7 @@ from core.exceptions import (
 )
 from repositories.conversation_repo import conversation_repo
 from repositories.user_repo import user_repo
+from schemas.chatbot_schema import ChatAskRequest
 from schemas.conversation_schema import (
     AddMembersRequest,
     ConversationCreateRequest,
@@ -23,6 +24,7 @@ from schemas.conversation_schema import (
     ConversationRole,
     ConversationUpdateRequest,
     SendMessageRequest,
+    SystemSendMessageRequest,
     UserConversationSummaryUpdate,
 )
 from schemas.invitation_schema import (
@@ -367,6 +369,10 @@ class ConversationService:
                     uid,
                     conversation_id,
                 )
+            if uid == "chatbot_system":
+                background_tasks.add_task(
+                    self.send_message_to_chatbot, requester_uid, message_data
+                )
 
         return ResponseSchema(
             data=ConversationMessageResponse(
@@ -384,6 +390,31 @@ class ConversationService:
                 attachments=saved_msg.attachments,
             )
         )
+
+    async def send_message_to_chatbot(
+        self, requester_uid: str, message_data: SendMessageRequest
+    ):
+        """Hàm này sẽ được gọi từ service của chatbot khi cần gửi tin nhắn vào conversation chatbot của user."""
+        from services.chatbot_service import chatbot_service
+
+        ans = await chatbot_service.ask(
+            requester_uid=requester_uid,
+            ask_request=ChatAskRequest(message=message_data.content),
+        )
+
+        message = SystemSendMessageRequest(
+            content=ans.data.payload
+            if ans.data and ans.data.payload
+            else "Hệ thống hiện đang gặp sự cố, vui lòng thử lại sau."
+        )
+
+        await self.conversation_repository.send_message(
+            conversation_id=f"chatbot_conv_{requester_uid}",
+            sender_uid="chatbot_system",
+            message_data=message,
+        )
+
+        pass
 
     async def delete_message_from_conversation(
         self, conversation_id: str, message_id: str, requester_uid: str
@@ -415,7 +446,7 @@ class ConversationService:
             conv = await self.conversation_repository.get_by_id(chatbot_conv_id)
         except NotFoundError:
             new_conv = ConversationCreateRequest(
-                name="Chatbot Assistant", description="Default chatbot conversation"
+                name="Chatbot Assistant", description="Trợ lý AI cá nhân của bạn"
             )
             conv = await self.conversation_repository.create(
                 uid, new_conv, custom_id=chatbot_conv_id

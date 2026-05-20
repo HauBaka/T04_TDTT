@@ -4,15 +4,18 @@ import ast
 import asyncio
 import json
 import re
-from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from time import perf_counter
 from typing import Any
 
-from loguru import logger
 from fastapi import BackgroundTasks
+from loguru import logger
 
 from externals.GroqLLM import groq_client
+from externals.SerpAPI import serp_api
+from externals.VietMapAPI import vietmap_api
+from repositories.hotel_repo import hotel_repo
 from schemas.chatbot_schema import (
     ChatAskRequest,
     ChatAskResponse,
@@ -22,16 +25,10 @@ from schemas.chatbot_schema import (
     ChatIntent,
     ChatRecommendationItem,
 )
-from schemas.discover_schema import DiscoverRequest, DiscoverHotel
+from schemas.discover_schema import DiscoverHotel
 from schemas.response_schema import ResponseSchema
-from externals.VietMapAPI import vietmap_api
-from repositories.hotel_repo import hotel_repo
-from externals.SerpAPI import serp_api
+from schemas.trip_context_schema import TravelStyle
 from services.semantic_encoder import semantic_text_encoder
-from utils.haversine_distance import haversine_distance
-from schemas.trip_context_schema import TravelStyle, TripSearchCriteria
-from services.conversation_service import conversation_service
-from schemas.conversation_schema import SendMessageRequest
 
 
 @dataclass
@@ -251,22 +248,22 @@ class ChatbotService:
             return True
         return any(keyword in normalized for keyword in complexity_keywords)
 
-    async def _save_chat_logs(self, requester_uid: str | None, chatbot_conv_id: str | None, user_message: str, bot_response: str, background_tasks: BackgroundTasks) -> None:
-        """Lưu lại tin nhắn ngầm vào conversation service. Uses API BackgroundTasks."""
-        if not requester_uid or not chatbot_conv_id:
-            return
+    # async def _save_chat_logs(self, requester_uid: str | None, chatbot_conv_id: str | None, user_message: str, bot_response: str, background_tasks: BackgroundTasks) -> None:
+    #     """Lưu lại tin nhắn ngầm vào conversation service. Uses API BackgroundTasks."""
+    #     if not requester_uid or not chatbot_conv_id:
+    #         return
 
-        try:
-            await conversation_service.send_message_to_conversation(
-                chatbot_conv_id, requester_uid, SendMessageRequest(content=user_message), background_tasks=background_tasks
-            )
-            await conversation_service.send_message_to_conversation(
-                chatbot_conv_id, "chatbot_system", SendMessageRequest(content=bot_response), background_tasks=background_tasks
-            )
-        except Exception as e:
-            logger.error(f"Failed to save chat logs: {e}")
+    #     try:
+    #         await conversation_service.send_message_to_conversation(
+    #             chatbot_conv_id, requester_uid, SendMessageRequest(content=user_message), background_tasks=background_tasks
+    #         )
+    #         await conversation_service.send_message_to_conversation(
+    #             chatbot_conv_id, "chatbot_system", SendMessageRequest(content=bot_response), background_tasks=background_tasks
+    #         )
+    #     except Exception as e:
+    #         logger.error(f"Failed to save chat logs: {e}")
 
-    async def ask(self, requester_uid: str | None, ask_request: ChatAskRequest, background_tasks: BackgroundTasks) -> ResponseSchema[ChatAskStringResponse]:
+    async def ask(self, requester_uid: str | None, ask_request: ChatAskRequest) -> ResponseSchema[ChatAskStringResponse]:
         """Điểm vào chính của Chatbot. Nhận yêu cầu, định tuyến, truy xuất, xếp hạng và sinh câu trả lời."""
         timings: dict[str, float] = {}
 
@@ -354,7 +351,7 @@ class ChatbotService:
             timings["general_answer"] = perf_counter() - stage_start
             timings["total"] = perf_counter() - total_start
             self._log_stage_timings(timings)
-            await self._save_chat_logs(requester_uid, chatbot_conv_id, user_message, general_answer, background_tasks)
+            #await self._save_chat_logs(requester_uid, chatbot_conv_id, user_message, general_answer, background_tasks)
             general_response = ChatAskResponse(
                 intent=decision.intent,
                 message=user_message,
@@ -379,7 +376,7 @@ class ChatbotService:
                 decision.clarification_question,
                 False,
             )
-            await self._save_chat_logs(requester_uid, chatbot_conv_id, user_message, casual_answer, background_tasks)
+            #await self._save_chat_logs(requester_uid, chatbot_conv_id, user_message, casual_answer, background_tasks)
             casual_response = ChatAskResponse(
                 intent=intent,
                 message=user_message,
@@ -465,7 +462,7 @@ class ChatbotService:
         )
         timings["total"] = perf_counter() - total_start
         self._log_stage_timings(timings)
-        await self._save_chat_logs(requester_uid, chatbot_conv_id, user_message, answer, background_tasks)
+        #await self._save_chat_logs(requester_uid, chatbot_conv_id, user_message, answer, background_tasks)
         return ResponseSchema(data=ChatAskStringResponse(payload=response.model_dump_json()))
 
     async def _hydrate_context_from_text(
@@ -1580,7 +1577,9 @@ class ChatbotService:
                     if serp_result and serp_result.data:
                         final_pool = serp_result.data
                         try:
-                            from services.discover_background_worker import discover_background_worker
+                            from services.discover_background_worker import (
+                                discover_background_worker,
+                            )
                             enqueued = discover_background_worker.enqueue(final_pool, {})
                             if not enqueued:
                                 logger.warning("Failed to enqueue SerpAPI results in Chatbot fallback")
