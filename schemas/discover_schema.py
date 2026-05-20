@@ -95,20 +95,11 @@ class UserReview(BaseModel):
     )
 
 
-# Review sau khi phân tích cảm xúc
-class AnalyzedReview(UserReview):
-    sentiment_score: float  # Điểm do PhoBERT chấm
-    trust_weight: float  # Trọng số tin cậy của review (0.0 -> 1.0)
-    adjusted_stars: (
-        float  # Điểm sau khi đối soát (kết hợp raw_stars và sentiment_score)
-    )
-
-
 class AISentimentResult(BaseModel):
     ai_score: float | None = None
     ai_score_expiration_date: datetime | None = None
     trust_weight: float = 0.0
-    analyzed_reviews: list[AnalyzedReview] = []
+    analyzed_reviews: list[UserReview] = []
 
 
 # Tóm tắt AI cho review

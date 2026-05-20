@@ -21,9 +21,9 @@ class SummaryService:
                 self, 
                 user_reviews: list[UserReview], 
                 hotel_name: str,
-                amenities: list[str] = [],
-                nearby_places: list[NearbyPlace] = [],
-                weather: list[WeatherInfo] = []
+                amenities: list[str] | None = None,
+                nearby_places: list[NearbyPlace] | None = None,
+                weather: list[WeatherInfo] | None = None
             ) -> AIReviewSummary:
         
         """
@@ -34,7 +34,7 @@ class SummaryService:
         valid_reviews = [rev for rev in user_reviews if (rev.trust_weight or 0.0) > 0.5]
         
         # Sắp xếp theo Trust Weight giảm dần (Lấy những review uy tín nhất lên đầu)
-        valid_reviews.sort(key=lambda x: x.trust_weight, reverse=True)
+        valid_reviews.sort(key=lambda x: x.trust_weight or 0.0, reverse=True)
                  
         # Chỉ lấy text của top 5 review xịn nhất để tiết kiệm Token
         trusted_texts = [rev.text for rev in valid_reviews[:5]]
