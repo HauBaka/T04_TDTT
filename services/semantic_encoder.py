@@ -58,6 +58,13 @@ class SemanticTextEncoder:
                     embedding = tuple(float(value) for value in vector)
                     ordered_results[position] = embedding
                     self._embedding_cache[text] = embedding
+                
+                # Limit cache size to prevent memory leaks
+                if len(self._embedding_cache) > 6000:
+                    overflow = len(self._embedding_cache) - 6000
+                    keys_to_delete = list(self._embedding_cache.keys())[:overflow]
+                    for key in keys_to_delete:
+                        del self._embedding_cache[key]
             except Exception as exc:
                 logger.warning(f"Không thể mã hoá semantic text: {str(exc)}")
                 return None
@@ -71,7 +78,7 @@ class SemanticTextEncoder:
         vectors = self.encode([left_text, right_text])
         if not vectors or len(vectors) < 2:
             return None
-        return self._cosine_similarity(vectors[0], vectors[1])
+        return self.cosine_similarity(vectors[0], vectors[1])
 
     def _ensure_loaded(self) -> None:
         if self._available is not None:
@@ -120,7 +127,7 @@ class SemanticTextEncoder:
         counts = torch.clamp(mask.sum(dim=1), min=1e-9)
         return summed / counts
 
-    def _cosine_similarity(self, left: tuple[float, ...], right: tuple[float, ...]) -> float:
+    def cosine_similarity(self, left: tuple[float, ...], right: tuple[float, ...]) -> float:
         dot = sum(a * b for a, b in zip(left, right))
         return max(-1.0, min(1.0, dot))
 

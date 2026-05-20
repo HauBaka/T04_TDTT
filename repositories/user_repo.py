@@ -2,6 +2,7 @@ import asyncio
 
 from google.cloud import firestore as fs
 from google.cloud.firestore_v1.base_query import FieldFilter
+from schemas.user_preference_schema import UserTravelPreference, UserTravelPreferenceUpdateRequest
 from loguru import logger
 from pydantic import ValidationError as PydanticValidationError
 
@@ -144,6 +145,42 @@ class UserRepository(BaseRepository):
             logger.exception("Error fetching users")
 
         return result
+    
+    async def update_user(self, uid: str, update_data: dict) -> None:
+        # NOTE: Để service xử lý exceptions
+        await self._update(uid, update_data)
+    
+    async def get_travel_preference(self, uid: str) -> UserTravelPreference:
+        """Lấy travel_profile field từ document user."""
+        user_doc = await self.get_user(uid)
+        preference = user_doc.travel_profile
+
+        if preference is None:
+            raise NotFoundError("Travel preference not found")
+
+        if isinstance(preference, UserTravelPreference):
+            return preference
+
+        return UserTravelPreference.model_validate(preference)
+    
+    async def update_travel_preference(self, uid: str, preference: UserTravelPreferenceUpdateRequest) -> UserTravelPreference:
+        """Ghi hoặc cập nhật travel_profile cho user."""
+        payload = preference.model_dump(exclude_none=True)
+
+        if not payload:
+            raise ValidationError("Travel preference payload cannot be empty")
+
+        await self._update(uid, {"travel_profile": payload})
+        return UserTravelPreference.model_validate(payload)
+    
+    async def delete_travel_preference(self, uid: str) -> bool:
+        """Xóa travel_profile của user."""
+        user_dict = await self._get_by_id(uid)
+        if not user_dict:
+            return False
+
+        await self._update(uid, {"travel_profile": None})
+        return True
 
     async def delete_user(self, uid: str) -> bool:
         """Xóa user theo uid"""

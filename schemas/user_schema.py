@@ -33,9 +33,13 @@ class UserDocument(BaseModel):
     created_at: datetime
     last_login: datetime | None = None
     last_updated: datetime | None = None
+    # Các trường thông tin cá nhân khác có thể thêm vào đây
+
+    # collections: list[CollectionPublicResponse] = Field(default_factory=list)
+    # user_behavior_history: list[UserBehaviorEvent] = Field(default_factory=list)
+
     # Trip hiện tại mà user đang tham gia
     current_trip: str | None = None
-    # TODO: Lưu vào collection "user_preference" để dễ quản lý hơn
     travel_profile: UserTravelPreference | None = None
     scoring_weights: ScoringWeights | None = None
 

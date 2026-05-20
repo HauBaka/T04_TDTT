@@ -8,9 +8,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from loguru import logger
 from slowapi.middleware import SlowAPIMiddleware
+from transformers import logging as transformers_logging
 
 import core.http_client as http_client
 from api.auth import auth_router
+from api.chatbot import chatbot_router
 from api.collection import collection_router
 from api.conversation import conversation_router
 from api.discover import discover_router
@@ -20,21 +22,24 @@ from api.notification import notification_router
 from api.trip import trip_router
 from api.upload import upload_router
 from api.user import user_router
+from api.user_travel_preference import user_travel_preference_router
 from api.view import view_router
 from core.database import firebase_manager
 from core.exceptions import AppException
 from core.limiter import AutoRateLimitMiddleware, limiter
-
-from mock_data.virtual_review import virtual_review_manager
-from externals.SemanticModel import semantic_model_client
 from externals.PhoBERT import PhoBERT
+from externals.SemanticModel import semantic_model_client
+from mock_data.virtual_review import virtual_review_manager
+from services.discover_background_worker import discover_background_worker
+
 
 # Khởi tạo các thành phần cần thiết
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    transformers_logging.set_verbosity_error()  # Ẩn warnings từ transformers
     # Khởi tạo Firebase
     await firebase_manager.initialize()
-    # # Khởi tạo Virtual Review
+    # Khởi tạo Virtual Review
     try:
         virtual_review_manager.initialize("mock_data/user_reviews.csv")
     except FileNotFoundError as e:
@@ -46,8 +51,11 @@ async def lifespan(app: FastAPI):
     semantic_model_client.load_model()
     # Khởi tạo HTTP client
     http_client._http_client = httpx.AsyncClient(timeout=10.0)
+    await discover_background_worker.start()
+
     yield
 
+    await discover_background_worker.stop()
     if http_client._http_client:
         await http_client._http_client.aclose()
 
@@ -98,8 +106,10 @@ app.include_router(invitation_router, tags=["invitation"])
 app.include_router(notification_router, tags=["notification"])
 app.include_router(conversation_router, tags=["conversation"])
 app.include_router(trip_router, tags=["trip"])
+app.include_router(chatbot_router, tags=["chatbot"])
 app.include_router(view_router, tags=["view"])
-app.include_router(upload_router, tags=["uploads"])
+app.include_router(upload_router, tags=["upload"])
+app.include_router(user_travel_preference_router, tags=["user_preference"])
 
 
 # Xử lý các lỗi

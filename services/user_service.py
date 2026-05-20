@@ -1,6 +1,7 @@
 import asyncio
 from typing import cast
 
+from fastapi import BackgroundTasks
 from loguru import logger
 from pydantic import ValidationError as PydanticValidationError
 
@@ -22,6 +23,11 @@ from schemas.collection_schema import (
 )
 from schemas.conversation_schema import ConversationResponse
 from schemas.response_schema import ResponseSchema, UserPreviewResponse
+from schemas.user_behavior_schema import UserBehaviorEventCreateRequest, UserEventType
+from schemas.user_preference_schema import (
+    UserTravelPreferenceResponse,
+    UserTravelPreferenceUpdateRequest,
+)
 from schemas.user_schema import (
     UserPrivateResponse,
     UserPublicResponse,
@@ -29,6 +35,7 @@ from schemas.user_schema import (
     UserUpdateRequest,
 )
 from schemas.view_schema import ViewResponse
+from services.behavior_service import behavior_service
 from services.collection_service import collection_service
 
 ALLOWED_UPDATE_FIELDS = {
@@ -247,7 +254,10 @@ class UserService:
             return [to_public(doc) for doc in collections]
 
     async def save_collection(
-        self, requester_uid: str, collection: UserSaveCollectionRequest
+        self,
+        requester_uid: str,
+        collection: UserSaveCollectionRequest,
+        background_tasks: BackgroundTasks,
     ) -> ResponseSchema[bool]:
         # Check collection exists
         collection_doc = await collection_repo.get_collection(collection.collection_id)
@@ -266,12 +276,24 @@ class UserService:
             collection_repo.add_saver(collection.collection_id, requester_uid),
         )
 
+        background_tasks.add_task(
+            behavior_service.record_event,
+            requester_uid,
+            UserBehaviorEventCreateRequest(
+                event_type=UserEventType.SAVE_COLLECTION,
+                target_id=collection_doc.id,
+                target_name=collection_doc.name,
+                metadata={"target_type": "collection"},
+                source="user_service",
+            ),
+        )
+
         return ResponseSchema(
             status_code=200, message="Collection saved successfully", data=True
         )
 
     async def unsave_collection(
-        self, requester_uid: str, collection_id: str
+        self, requester_uid: str, collection_id: str, background_tasks: BackgroundTasks
     ) -> ResponseSchema[bool]:
         # Check collection exists
         collection_doc = await collection_repo.get_collection(collection_id)
@@ -286,18 +308,30 @@ class UserService:
             collection_repo.remove_saver(collection_id, requester_uid),
         )
 
+        background_tasks.add_task(
+            behavior_service.record_event,
+            requester_uid,
+            UserBehaviorEventCreateRequest(
+                event_type=UserEventType.REMOVE_COLLECTION,
+                target_id=collection_doc.id,
+                target_name=collection_doc.name,
+                metadata={"target_type": "collection"},
+                source="user_service",
+            ),
+        )
+
         return ResponseSchema(
             status_code=200, message="Collection unsaved successfully", data=True
         )
 
     async def add_favourite_place(
-        self, requester_uid: str, place_id: str
+        self, requester_uid: str, place_id: str, background_tasks: BackgroundTasks
     ) -> ResponseSchema[bool]:
         user_doc = await self.user_repo.get_user(requester_uid)
 
         try:
             await collection_service.add_places_to_collection(
-                user_doc.liked_collection, requester_uid, [place_id]
+                user_doc.liked_collection, requester_uid, [place_id], background_tasks
             )
             return ResponseSchema(
                 status_code=200,
@@ -312,13 +346,13 @@ class UserService:
             )
 
     async def remove_favourite_place(
-        self, requester_uid: str, place_id: str
+        self, requester_uid: str, place_id: str, background_tasks: BackgroundTasks
     ) -> ResponseSchema[bool]:
         user_doc = await self.user_repo.get_user(requester_uid)
 
         try:
             await collection_service.remove_places_from_collection(
-                user_doc.liked_collection, requester_uid, [place_id]
+                user_doc.liked_collection, requester_uid, [place_id], background_tasks
             )
             return ResponseSchema(
                 status_code=200,
@@ -409,6 +443,65 @@ class UserService:
             status_code=200,
             message="User suggestions retrieved successfully",
             data=[to_preview(doc) for doc in suggested_users],
+        )
+
+    async def get_travel_preference(
+        self, uid: str
+    ) -> ResponseSchema[UserTravelPreferenceResponse]:
+        """Lấy travel_profile của user."""
+        preference_data = await self.user_repo.get_travel_preference(uid)
+
+        return ResponseSchema(
+            status_code=200,
+            message="Travel preference retrieved successfully",
+            data=UserTravelPreferenceResponse(preference=preference_data),
+        )
+
+    async def update_travel_preference(
+        self,
+        uid: str,
+        preference: UserTravelPreferenceUpdateRequest,
+    ) -> ResponseSchema[UserTravelPreferenceResponse]:
+        """Tạo mới/cập nhật travel_profile cho user."""
+        update_data = preference.model_dump(exclude_unset=True)
+        if not update_data:
+            raise BadRequestError("No travel preference fields provided for update")
+
+        try:
+            existing_preference = await self.user_repo.get_travel_preference(uid)
+            # Merge existing with update data
+            merged_data = existing_preference.model_dump()
+            merged_data.update(update_data)
+            update_request = UserTravelPreferenceUpdateRequest.model_validate(
+                merged_data
+            )
+        except NotFoundError:
+            # User không tồn tại hoặc chưa có preference, tạo mới
+            update_request = preference
+
+        try:
+            updated_preference = await self.user_repo.update_travel_preference(
+                uid, update_request
+            )
+        except NotFoundError:
+            raise NotFoundError("User not found")
+
+        return ResponseSchema(
+            status_code=200,
+            message="Travel preference updated successfully",
+            data=UserTravelPreferenceResponse(preference=updated_preference),
+        )
+
+    async def delete_travel_preference(self, uid: str) -> ResponseSchema[bool]:
+        """Xóa travel_profile của user."""
+        deleted = await self.user_repo.delete_travel_preference(uid)
+        # if not deleted:
+        #     raise NotFoundError("User not found or preference could not be deleted")
+
+        return ResponseSchema(
+            status_code=200,
+            message="Travel preference deleted successfully",
+            data=deleted,
         )
 
 
