@@ -40,7 +40,6 @@ class TripMemberTracking(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    uid: str
     lat: float | None = None
     lng: float | None = None
     updated_at: datetime
