@@ -1,23 +1,25 @@
+from loguru import logger
+
+from core.cache import cache_get, cache_key, cache_set
 from core.exceptions import AppException, NotFoundError
+from externals.SerpAPI import serp_api
+from externals.VietMapAPI import vietmap_api
+from mock_data.virtual_review import virtual_review_manager
+from repositories.hotel_repo import hotel_repo
 from schemas.discover_schema import (
     AddressSuggestion,
     AddressSuggestionRequest,
     AddressSuggestionResponse,
-    DiscoverRequest,
     DiscoverHotel,
+    DiscoverRequest,
     DiscoverResponse,
     WeatherInfo,
 )
 from schemas.response_schema import GPSCoordinates, ResponseSchema
-from services.weather_service import weather_service
-from services.hotel_ranking_service import hotel_ranking_service
-from services.discover_background_worker import discover_background_worker
-from mock_data.virtual_review import virtual_review_manager
-from loguru import logger
-from externals.SerpAPI import serp_api
-from externals.VietMapAPI import vietmap_api
-from repositories.hotel_repo import hotel_repo
 from schemas.vietmap_schema import AutoCompleteResult
+from services.discover_background_worker import discover_background_worker
+from services.hotel_ranking_service import hotel_ranking_service
+from services.weather_service import weather_service
 from utils.haversine_distance import haversine_distance
 
 
@@ -49,18 +51,20 @@ class DiscoverService:
 
     async def execute_discover_pipeline(self) -> DiscoverResponse:
         """Thực thi pipeline tìm kiếm"""
+        key = self._build_cache_key()
+        cache_response = await self._get_from_cache()
+        if cache_response:
+            return cache_response
+
         gps_coordinates = None
         if self.payload.ref_id:
             # Nếu có ref_id, ưu tiên lấy GPS từ VietMap để có kết quả chính xác hơn
             place_detail = await vietmap_api.get_place_details(self.payload.ref_id)
-            if (
-                place_detail
-                and place_detail.result
-            ):
+            if place_detail and place_detail.result:
                 if place_detail.result.gps_coordinates:
                     gps_coordinates = place_detail.result.gps_coordinates
                 self.payload.address = place_detail.result.name
-                
+
                 self.searching_place = AutoCompleteResult(
                     name=place_detail.result.name,
                     address=place_detail.result.address,
@@ -75,17 +79,14 @@ class DiscoverService:
             if autocomplete_result and autocomplete_result.data:
                 # Ko có gps ng dùng thì lấy cái đầu
                 self.payload.address = autocomplete_result.data[0].display
-                
+
                 place_detail = await vietmap_api.get_place_details(
                     autocomplete_result.data[0].ref_id
                 )
-                if (
-                    place_detail
-                    and place_detail.result
-                ):
+                if place_detail and place_detail.result:
                     if place_detail.result.gps_coordinates:
                         gps_coordinates = place_detail.result.gps_coordinates
-                        
+
                     self.searching_place = AutoCompleteResult(
                         name=place_detail.result.name,
                         address=place_detail.result.address,
@@ -128,7 +129,7 @@ class DiscoverService:
         raw_results = list(hotel_dict.values())
 
         await self.get_reviews(raw_results)
-        
+
         weather_by_identity: dict[str, list[WeatherInfo]] = {}
         try:
             destination_gps = gps_coordinates or self.payload.gps
@@ -139,7 +140,9 @@ class DiscoverService:
                 destination_gps=destination_gps,
             )
         except Exception as exc:
-            logger.warning(f"Không xây dựng được weather context cho pipeline: {str(exc)}")
+            logger.warning(
+                f"Không xây dựng được weather context cho pipeline: {str(exc)}"
+            )
 
         raw_results = await hotel_ranking_service.rank_discovered_hotels(
             raw_results,
@@ -151,11 +154,21 @@ class DiscoverService:
         enqueued = discover_background_worker.enqueue(raw_results, weather_by_identity)
         if not enqueued:
             logger.warning("Discover background worker enqueue returned False")
-        
+
         await self._calculate_distance_for_results(raw_results)
 
-        return DiscoverResponse(searching_place=self.searching_place, data=raw_results)
-    
+        # Cache the result
+        result = DiscoverResponse(
+            searching_place=self.searching_place, data=raw_results
+        )
+
+        await cache_set(
+            key,
+            DiscoverResponse(searching_place=self.searching_place, data=raw_results),
+        )
+
+        return result
+
     @staticmethod
     async def suggest_addresses(
         query: AddressSuggestionRequest,
@@ -223,8 +236,6 @@ class DiscoverService:
 
         return ResponseSchema(data=hotel_detail)
 
-
-
     async def _calculate_distance_for_results(self, hotels: list[DiscoverHotel]):
         """Tính khoảng cách từ searching_place đến từng hotel
 
@@ -242,3 +253,31 @@ class DiscoverService:
                     ),
                     hotel.gps_coordinates,
                 )
+
+    def _build_cache_key(self) -> str:
+        """Xây dựng cache key dựa trên payload đầu vào"""
+        return cache_key(
+            "discover",
+            self.payload.address or "",
+            str(self.payload.check_in),
+            str(self.payload.check_out),
+            str(self.payload.adults),
+            str(self.payload.children),
+            str(self.payload.ref_id or ""),
+        )
+
+    async def _get_from_cache(self) -> DiscoverResponse | None:
+        """Thử lấy kết quả từ cache dựa trên payload đầu vào"""
+        key = self._build_cache_key()
+
+        cached = await cache_get(key)
+        if cached:
+            try:
+                return DiscoverResponse.model_validate(cached)
+            except Exception as exc:
+                logger.warning(
+                    f"Failed to parse cached discover response: {cached}, error: {str(exc)}"
+                )
+                return None
+
+        return None

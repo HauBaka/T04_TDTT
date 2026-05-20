@@ -5,6 +5,7 @@ from google.cloud.firestore_v1.base_query import FieldFilter
 from loguru import logger
 from pydantic import ValidationError as PydanticValidationError
 
+from core.cache import cache_delete
 from core.exceptions import ValidationError
 from repositories.base_repo import BaseRepository
 from repositories.hotel_repo import hotel_repo
@@ -95,8 +96,10 @@ class CollectionRepository(BaseRepository):
         # Xóa main document
         batch = self._db.batch()
         batch.delete(ref)
-        await batch.commit()
+        # Cache invalidate
 
+        await batch.commit()
+        await cache_delete(self._build_cache_key("id", collection_id))
         return True
 
     async def get_collection(self, collection_id: str) -> CollectionDocument:

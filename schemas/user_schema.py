@@ -1,10 +1,9 @@
 from datetime import datetime
-from schemas.collection_schema import CollectionPublicResponse
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from schemas.collection_schema import CollectionPublicResponse
-from schemas.user_preference_schema import ScoringWeights, UserTravelPreference, UserBehaviorEvent
+from schemas.user_preference_schema import ScoringWeights, UserTravelPreference
 
 
 class UserDocument(BaseModel):
@@ -35,10 +34,10 @@ class UserDocument(BaseModel):
     last_login: datetime | None = None
     last_updated: datetime | None = None
     # Các trường thông tin cá nhân khác có thể thêm vào đây
-    
+
     # collections: list[CollectionPublicResponse] = Field(default_factory=list)
     # user_behavior_history: list[UserBehaviorEvent] = Field(default_factory=list)
-    
+
     # Trip hiện tại mà user đang tham gia
     current_trip: str | None = None
     travel_profile: UserTravelPreference | None = None

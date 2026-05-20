@@ -6,27 +6,9 @@ from fastapi.concurrency import asynccontextmanager
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from api.health import health_router
-from api.discover import discover_router
-from api.auth import auth_router
-from api.user import user_router
-from api.collection import collection_router
-from api.invitation import invitation_router
-from api.notification import notification_router
-from api.conversation import conversation_router
-from api.trip import trip_router
-from api.view import view_router
-from api.upload import upload_router
-from api.user_travel_preference import user_travel_preference_router
-from core.database import firebase_manager
-from core.exceptions import AppException
-from core.limiter import limiter, AutoRateLimitMiddleware
-from slowapi.middleware import SlowAPIMiddleware
-from mock_data.virtual_review import virtual_review_manager
-from externals.PhoBERT import PhoBERT
-from externals.SemanticModel import semantic_model_client
 from loguru import logger
 from slowapi.middleware import SlowAPIMiddleware
+from transformers import logging as transformers_logging
 
 import core.http_client as http_client
 from api.auth import auth_router
@@ -40,6 +22,7 @@ from api.notification import notification_router
 from api.trip import trip_router
 from api.upload import upload_router
 from api.user import user_router
+from api.user_travel_preference import user_travel_preference_router
 from api.view import view_router
 from core.database import firebase_manager
 from core.exceptions import AppException
@@ -53,6 +36,7 @@ from services.discover_background_worker import discover_background_worker
 # Khởi tạo các thành phần cần thiết
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    transformers_logging.set_verbosity_error()  # Ẩn warnings từ transformers
     # Khởi tạo Firebase
     await firebase_manager.initialize()
     # Khởi tạo Virtual Review
@@ -68,6 +52,7 @@ async def lifespan(app: FastAPI):
     # Khởi tạo HTTP client
     http_client._http_client = httpx.AsyncClient(timeout=10.0)
     await discover_background_worker.start()
+
     yield
 
     await discover_background_worker.stop()
@@ -125,6 +110,8 @@ app.include_router(chatbot_router, tags=["chatbot"])
 app.include_router(view_router, tags=["view"])
 app.include_router(upload_router, tags=["upload"])
 app.include_router(user_travel_preference_router, tags=["user_preference"])
+
+
 # Xử lý các lỗi
 @app.exception_handler(AppException)  # Xử lý lỗi ứng dụng
 async def app_exception_handler(request: Request, exc: AppException):

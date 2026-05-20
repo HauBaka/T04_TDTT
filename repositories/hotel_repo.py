@@ -6,9 +6,10 @@ from google.cloud.firestore_v1 import FieldFilter
 from loguru import logger
 from pydantic import ValidationError as PydanticValidationError
 
+from core.cache import cache_key, cache_set
 from core.exceptions import ValidationError
 from core.settings import settings
-from repositories.base_repo import BaseRepository
+from repositories.base_repo import MAX_IN_QUERY, BaseRepository
 from schemas.discover_schema import DiscoverHotel, HotelDocument
 
 
@@ -164,6 +165,17 @@ class HotelRepository(BaseRepository):
 
     async def search_hotels(self, lat: float, lng: float) -> list[DiscoverHotel]:
         """Tìm kiếm khách sạn dựa trên tọa độ và bán kính."""
+        # Cache lookup
+        key = cache_key("search", f"{lat:.4f}", f"{lng:.4f}")
+        cached = await self._get_from_cache(key)
+        if cached is not None:
+            try:
+                hotels = [DiscoverHotel.model_validate(item) for item in cached]
+                return hotels
+            except PydanticValidationError as e:
+                logger.error(f"Error validating cached hotel data: {str(e)}")
+                # Nếu cache bị lỗi, tiếp tục thực hiện truy vấn bình thường
+
         center_hash = pgh.encode(
             lat, lng, precision=settings.GEOHASH_PRECISION
         )  # precision=5 cho khoảng 4.9km x 4.9km, có thể điều chỉnh tuỳ nhu cầu
@@ -171,7 +183,7 @@ class HotelRepository(BaseRepository):
         tasks = [self._query_geohash_range(h) for h in hashes]
         query_results = await asyncio.gather(*tasks)
 
-        hotels = []
+        hotels: list[DiscoverHotel] = []
 
         seen_ids = set()
         for docs in query_results:
@@ -190,6 +202,8 @@ class HotelRepository(BaseRepository):
                         f"Error validating hotel data for document {doc.id}: {str(e)}"
                     )
 
+        # Cache the search results
+        await cache_set(key, hotels, ttl_seconds=300)
         return hotels
 
     async def search_hotels_by_name(self, name: str) -> list[HotelDocument]:
@@ -237,28 +251,83 @@ class HotelRepository(BaseRepository):
             raise ValidationError("No property tokens provided")
 
         try:
-            doc_refs = [self._collection.document(token) for token in property_tokens]
-            docs = [doc async for doc in self._db.get_all(doc_refs)]
             hotels = {}
-            for doc in docs:
-                if not doc.exists:
+            # Thử lấy từ cache trước
+            cache_keys = {
+                token: self._build_cache_key("id", token)
+                for token in property_tokens
+            }
+
+            cached_items = await self._get_many_from_cache(list(cache_keys.values()))
+            missing_tokens = []
+
+            for token, key in cache_keys.items():
+                cached = cached_items.get(key)
+                if cached is None:
+                    missing_tokens.append(token)
                     continue
 
-                data = doc.to_dict() or {}
-                data["id"] = doc.id
                 try:
-                    hotel = HotelDocument.model_validate(data)
-                    hotels[doc.id] = hotel
+                    hotel = HotelDocument.model_validate(cached)
+                    hotels[token] = hotel
+
                 except PydanticValidationError as e:
                     logger.error(
-                        f"Error validating hotel data for document {doc.id}: {str(e)}"
+                        f"Error validating cached hotel data for {token}: {str(e)}"
                     )
+                    missing_tokens.append(token)
 
-        except Exception as e:
-            logger.error(f"Error fetching hotels: {str(e)}")
+            # Nếu cache hit hết thì return luôn
+            if not missing_tokens:
+                return hotels
+
+            # Lấy phần còn thiếu từ Firestore
+            for i in range(0, len(missing_tokens), MAX_IN_QUERY):
+
+                chunk_tokens = missing_tokens[i:i + MAX_IN_QUERY]
+
+                doc_refs = [
+                    self._collection.document(token)
+                    for token in chunk_tokens
+                ]
+
+                docs = [
+                    doc async for doc in self._db.get_all(doc_refs)
+                ]
+
+                cache_payload = {}
+
+                for doc in docs:
+                    if not doc.exists:
+                        continue
+
+                    data = doc.to_dict() or {}
+                    data["id"] = doc.id
+
+                    try:
+                        hotel = HotelDocument.model_validate(data)
+
+                        hotels[doc.id] = hotel
+
+                        cache_payload[
+                            self._build_cache_key("id", doc.id)
+                        ] = data
+
+                    except PydanticValidationError as e:
+                        logger.error(
+                            f"Error validating hotel data for document {doc.id}: {str(e)}"
+                        )
+
+                # Cache write back
+                if cache_payload:
+                    await self._set_many_to_cache(cache_payload)
+
+        except Exception:
+            logger.exception("Error fetching hotels")
             hotels = {}
-        return hotels
 
+        return hotels
+    
     async def get_places(self, place_ids: list[str]) -> list[HotelDocument]:
         """Lấy thông tin nhiều địa điểm (places) dựa trên place_ids.
 

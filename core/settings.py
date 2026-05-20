@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     R2_ALLOWED_IMAGE_MIME_TYPES: str = "image/jpeg,image/png,image/webp,image/gif"
     UPLOAD_PENDING_TTL_MINUTES: int = 30
 
+    # Redis
+    REDIS_URL: str
+    REDIS_PREFIX: str
+    REDIS_CACHE_DEBUG: bool = False
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
