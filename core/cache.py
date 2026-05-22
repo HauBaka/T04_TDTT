@@ -1,9 +1,8 @@
-from collections.abc import Mapping
 from datetime import date, datetime
 from typing import Any
-from google.cloud.firestore_v1.transforms import Increment
 
 import orjson
+from google.cloud.firestore_v1.transforms import Increment
 from loguru import logger
 from pydantic import BaseModel
 from redis.asyncio import Redis
@@ -133,6 +132,7 @@ async def cache_mset(
 
 
 async def cache_delete(*keys: str) -> None:
+    _debug(f"PENDING CACHE DELETE: {keys}")
     try:
         redis = get_redis()
 
@@ -142,7 +142,6 @@ async def cache_delete(*keys: str) -> None:
 
     except Exception:
         logger.exception(f"Redis DELETE failed: {keys}")
-
 
 
 def deep_update(target: dict, updates: dict) -> dict:
