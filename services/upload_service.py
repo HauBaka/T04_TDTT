@@ -1,17 +1,17 @@
 from datetime import datetime, timedelta, timezone
 from typing import Dict
 
-from core.exceptions import AppException, ValidationError, NotFoundError
-from externals.r2_client import r2_client
+from core.exceptions import AppException, NotFoundError, ValidationError
 from core.settings import settings
+from externals.r2_client import r2_client
 from repositories.upload_repo import upload_repo
 from schemas.upload_schema import (
+    UploadCategory,
+    UploadConfirmRequest,
+    UploadConfirmResponse,
     UploadCreateRequest,
     UploadPresignRequest,
     UploadPresignResponse,
-    UploadConfirmRequest,
-    UploadConfirmResponse,
-    UploadCategory,
     UploadStatus,
 )
 
@@ -22,11 +22,14 @@ _ALLOWED_EXTENSIONS: Dict[str, str] = {
     "image/gif": ".gif",
 }
 
+
 class UploadService:
     def __init__(self, user_id: str) -> None:
         self.user_id = user_id
 
-    async def create_presigned_upload(self, request: UploadPresignRequest) -> UploadPresignResponse:
+    async def create_presigned_upload(
+        self, request: UploadPresignRequest
+    ) -> UploadPresignResponse:
         self._validate_file_size(request.file_size)
         self._validate_mime_type(request.content_type)
 
@@ -67,7 +70,9 @@ class UploadService:
             expires_at=expires_at.isoformat(),
         )
 
-    async def confirm_upload(self, request: UploadConfirmRequest) -> UploadConfirmResponse:
+    async def confirm_upload(
+        self, request: UploadConfirmRequest
+    ) -> UploadConfirmResponse:
         pending = await upload_repo.get_pending_by_key(self.user_id, request.file_key)
         if not pending:
             raise NotFoundError("Pending upload not found")
@@ -101,8 +106,10 @@ class UploadService:
         self._validate_mime_type(content_type)
 
         await upload_repo.mark_confirmed(
-            pending.id,
-            {
+            doc_id=pending.id,
+            user_id=self.user_id,
+            file_key=request.file_key,
+            update_data={
                 "status": UploadStatus.CONFIRMED.value,
                 "confirmed_at": datetime.now(timezone.utc),
                 "etag": head.get("ETag"),

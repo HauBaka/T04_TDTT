@@ -92,9 +92,9 @@ class SemanticTextEncoder:
                 self._model.eval()
             self._available = self._tokenizer is not None and self._model is not None
             if self._available:
-                logger.info(f"Semantic encoder ready")
+                logger.info("Semantic encoder ready")
             else:
-                logger.warning(f"Semantic encoder not available")
+                logger.warning("Semantic encoder not available")
         except Exception as exc:
             self._available = False
             self._tokenizer = None
