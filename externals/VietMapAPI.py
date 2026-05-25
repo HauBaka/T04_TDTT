@@ -17,6 +17,9 @@ class VietMapAPI:
         self.search_url = "https://maps.vietmap.vn/api/{type}/v4"
         self.api_key = settings.VIETMAP_API_KEY.get_secret_value()
         self.display_type = 6
+        self.client = httpx.AsyncClient(
+            timeout=httpx.Timeout(20.0), headers={"Accept": "application/json"}
+        )
 
     async def get_status(self) -> dict:
         """Kiểm tra trạng thái của API."""
@@ -25,10 +28,12 @@ class VietMapAPI:
     async def get_place_details(self, ref_id: str) -> VietMapPlaceDetailResponse:
         """Lấy chi tiết địa điểm dựa trên ref_id."""
         params = {"refid": ref_id, "apikey": self.api_key}
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
+
+        try:
+            response = await self.client.get(
                 self.search_url.format(type="place"), params=params
             )
+
             if response.status_code == 200:
                 data = response.json()
                 return VietMapPlaceDetailResponse(
@@ -51,7 +56,10 @@ class VietMapAPI:
             logger.warning(
                 f"Failed to get place details from VietMap for ref_id {ref_id}: HTTP {response.status_code} - {response.text}"
             )
-
+        except httpx.ReadTimeout:
+            logger.error(f"VietMap timeout for ref_id={ref_id}")
+        except Exception as e:
+            logger.exception(f"Unexpected VietMap error for ref_id={ref_id}: {e}")
         return VietMapPlaceDetailResponse(result=None)
 
     async def autocomplete(
@@ -66,13 +74,11 @@ class VietMapAPI:
         if gps:
             params["focus"] = f"{gps.latitude},{gps.longitude}"
 
-        headers = {"Accept": "application/json"}
-        async with httpx.AsyncClient(headers=headers) as client:
-            response = await client.get(
-                self.search_url.format(type="autocomplete"),
-                params=params,
-                headers=headers,
+        try:
+            response = await self.client.get(
+                self.search_url.format(type="autocomplete"), params=params
             )
+
             if response.status_code == 200:
                 data = response.json()
 
@@ -89,6 +95,14 @@ class VietMapAPI:
 
                 return VietMapAutocompleteResponse(data=results)
 
+            logger.warning(
+                f"VietMap autocomplete failed for text={text}: "
+                f"HTTP {response.status_code} - {response.text}"
+            )
+        except httpx.ReadTimeout:
+            logger.error(f"VietMap timeout for text={text}")
+        except Exception as e:
+            logger.exception(f"Unexpected VietMap error for text={text}: {e}")
         return VietMapAutocompleteResponse(data=[])
 
 

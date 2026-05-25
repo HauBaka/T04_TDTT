@@ -1,56 +1,69 @@
-from datetime import datetime, timedelta, timezone
+import asyncio
 import json
 import logging
 import re
-import asyncio
-from externals.Gemini import gemini_client
+import textwrap
+from datetime import datetime, timedelta, timezone
+
 from externals.OllamaSummary import ollama_client
+from schemas.discover_schema import (
+    AIReviewSummary,
+    DiscoverHotel,
+    NearbyPlace,
+    UserReview,
+    WeatherInfo,
+)
 from services.hotel_ranking_service import hotel_ranking_service
 from services.weather_service import weather_service
-from schemas.discover_schema import DiscoverHotel, NearbyPlace, AIReviewSummary, WeatherInfo, UserReview
-import textwrap
+
 logger = logging.getLogger(__name__)
-SUMMARY_CACHE_EXPIRATION_DAYS = 14 
+SUMMARY_CACHE_EXPIRATION_DAYS = 14
+
 
 class SummaryService:
     def __init__(self):
-        #self.ai_client = gemini_client
-        self.ai_client=ollama_client
+        # self.ai_client = gemini_client
+        self.ai_client = ollama_client
 
     async def generate_places_summary(
-                self, 
-                user_reviews: list[UserReview], 
-                hotel_name: str,
-                amenities: list[str] | None = None,
-                nearby_places: list[NearbyPlace] | None = None,
-                weather: list[WeatherInfo] | None = None
-            ) -> AIReviewSummary:
-        
+        self,
+        user_reviews: list[UserReview],
+        hotel_name: str,
+        amenities: list[str] | None = None,
+        nearby_places: list[NearbyPlace] | None = None,
+        weather: list[WeatherInfo] | None = None,
+    ) -> AIReviewSummary:
         """
         Multi-source RAG: Tóm tắt dựa trên Reviews, Tiện ích, Thời tiết và Vị trí.
         """
         # Lọc & Sắp xếp Reviews (Retrieval)
         # Chỉ lấy review có độ tin cậy > 0.5
         valid_reviews = [rev for rev in user_reviews if (rev.trust_weight or 0.0) > 0.5]
-        
+
         # Sắp xếp theo Trust Weight giảm dần (Lấy những review uy tín nhất lên đầu)
         valid_reviews.sort(key=lambda x: x.trust_weight or 0.0, reverse=True)
-                 
+
         # Chỉ lấy text của top 5 review xịn nhất để tiết kiệm Token
         trusted_texts = [rev.text for rev in valid_reviews[:5]]
         # Nếu không có review nào đủ tin cậy, vẫn phải đảm bảo context_reviews có giá trị để prompt không bị lỗi
-        context_reviews = "\n- ".join(trusted_texts) if trusted_texts else "Chưa có đánh giá chi tiết."
+        context_reviews = (
+            "\n- ".join(trusted_texts)
+            if trusted_texts
+            else "Chưa có đánh giá chi tiết."
+        )
 
         # Xử lý amenities và nearby_places để đưa vào prompt
-        context_amenities = ", ".join(amenities) if amenities else "Không có dữ liệu tiện ích."
-        
+        context_amenities = (
+            ", ".join(amenities) if amenities else "Không có dữ liệu tiện ích."
+        )
+
         # Xử lý nearby_places theo đúng cấu trúc có chứa 'transportations'
         context_nearby_list = []
         if nearby_places:
             for p in nearby_places:
                 name = p.name
                 transportations = getattr(p, "transportations", [])
-                
+
                 if transportations:
                     # Lấy thông tin di chuyển đầu tiên (ví dụ: Walking - 4 phút)
                     trans = transportations[0]
@@ -60,16 +73,16 @@ class SummaryService:
                     context_nearby_list.append(f"{name} ({trans_type}: {duration})")
                 else:
                     context_nearby_list.append(name)
-            
+
             context_nearby = "\n- ".join(context_nearby_list)
         else:
             context_nearby = "Không có dữ liệu vị trí."
-        
+
         # Xử lý weather để đưa vào prompt
         if weather:
-            context_weather= weather_service.summarize_trip_weather(weather)
+            context_weather = weather_service.summarize_trip_weather(weather)
         else:
-            context_weather="Chưa có dữ liệu thời tiết."
+            context_weather = "Chưa có dữ liệu thời tiết."
 
         # 3. Xây dựng prompt
         prompt = textwrap.dedent(f"""
@@ -109,37 +122,42 @@ class SummaryService:
         
         [4. DỰ BÁO THỜI TIẾT TẠI ĐIỂM ĐẾN]:
         {context_weather}
-        """
-        )
+        """)
 
         # Gọi Gemini
         try:
-            response_text = await asyncio.to_thread(self.ai_client.generate_content, prompt)
+            response_text = await asyncio.to_thread(
+                self.ai_client.generate_content, prompt
+            )
             if not response_text:
                 raise ValueError("Gemini API trả về rỗng.")
 
             # Trích xuất JSON từ phản hồi
-            match = re.search(r'\{.*\}', response_text, re.DOTALL)
+            match = re.search(r"\{.*\}", response_text, re.DOTALL)
             if match:
                 json_string = match.group(0)
                 try:
                     summary_data = json.loads(json_string)
+                    logger.debug(
+                        "Successfully generated AI summary for hotel '%s'", hotel_name
+                    )
+
                     return AIReviewSummary(**summary_data)
                 except json.JSONDecodeError as e:
                     logger.error(f"Lỗi cú pháp JSON từ Gemini: {e}")
                     raise ValueError("AI sinh cấu trúc lỗi.")
             else:
                 raise ValueError("Không tìm thấy JSON.")
-            
+
         except Exception as e:
             logger.error(f"Lỗi AI Summary cho '{hotel_name}': {str(e)}")
             return AIReviewSummary(
-                overview= "Không thể tải tóm tắt tổng quan lúc này.",
-                pros= ["Không thể tải tóm tắt ưu điểm lúc này."],
-                cons= ["Không thể tải tóm tắt nhược điểm lúc này."],
-                notes= "Hệ thống AI đang bận, vui lòng thử lại sau."
+                overview="Không thể tải tóm tắt tổng quan lúc này.",
+                pros=["Không thể tải tóm tắt ưu điểm lúc này."],
+                cons=["Không thể tải tóm tắt nhược điểm lúc này."],
+                notes="Hệ thống AI đang bận, vui lòng thử lại sau.",
             )
-        
+
     async def process_places_ai_summary(
         self,
         filtered_places: list[DiscoverHotel],
@@ -168,17 +186,19 @@ class SummaryService:
             user_reviews = place.user_reviews
             amenities = place.amenities
             nearby_places = place.nearby_places
-            
-            hotel_name = place.name 
-            
+
+            hotel_name = place.name
+
             # 2. Kiểm tra đã có ai_summary và ai_summary_expiration_date chưa
             ai_summary = place.ai_summary
-            expiration_date = ai_summary.ai_summary_expiration_date if ai_summary else None
+            expiration_date = (
+                ai_summary.ai_summary_expiration_date if ai_summary else None
+            )
 
             if ai_summary and expiration_date and now < expiration_date:
                 # Nếu đã có tóm tắt và còn hạn, không cần gọi AI
                 continue
-            
+
             weather_key = hotel_ranking_service._hotel_weather_key(place)
             weather = weather_by_identity.get(weather_key, [])
 
@@ -189,7 +209,7 @@ class SummaryService:
                 hotel_name=hotel_name,
                 amenities=amenities,
                 nearby_places=nearby_places,
-                weather=weather
+                weather=weather,
             )
             ai_tasks.append(task)
             places_needing_summary.append(place)
@@ -210,7 +230,7 @@ class SummaryService:
                         overview="Không thể tải tóm tắt tổng quan lúc này.",
                         pros=["Lỗi hệ thống khi tải tóm tắt ưu điểm."],
                         cons=["Lỗi hệ thống khi tải tóm tắt nhược điểm."],
-                        notes="Không thể tổng hợp bằng AI lúc này."
+                        notes="Không thể tổng hợp bằng AI lúc này.",
                     )
                     # Đặt ngày hết hạn là thời điểm hiện tại (now) để lần tìm kiếm sau nó tự động gọi lại AI thay vì bị kẹt 14 ngày
                     place.ai_summary.ai_summary_expiration_date = now
@@ -218,5 +238,6 @@ class SummaryService:
                     # Cập nhật kết quả AI vào Place
                     place.ai_summary = summary
                     place.ai_summary.ai_summary_expiration_date = new_expiration_date
+
 
 summary_service = SummaryService()

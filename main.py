@@ -41,7 +41,7 @@ async def lifespan(app: FastAPI):
     await firebase_manager.initialize()
     # Khởi tạo Virtual Review
     try:
-        virtual_review_manager.initialize("mock_data/user_reviews.csv")
+        virtual_review_manager.initialize("mock_data/user_reviews_vi.csv")
     except FileNotFoundError as e:
         logger.error(f"Error initializing virtual review manager: {e}")
 

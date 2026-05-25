@@ -117,7 +117,9 @@ class HotelRepository(BaseRepository):
 
             await self.upsert_hotels(to_upsert)
             await self.delete_hotels(to_delete)
-
+            logger.info(
+                f"sync_hotels_background completed: {len(to_upsert)} hotels upserted, {len(to_delete)} hotels deleted"
+            )
         except Exception as e:
             logger.error(f"sync_hotels_background error: {str(e)}")
 
@@ -254,8 +256,7 @@ class HotelRepository(BaseRepository):
             hotels = {}
             # Thử lấy từ cache trước
             cache_keys = {
-                token: self._build_cache_key("id", token)
-                for token in property_tokens
+                token: self._build_cache_key("id", token) for token in property_tokens
             }
 
             cached_items = await self._get_many_from_cache(list(cache_keys.values()))
@@ -283,17 +284,11 @@ class HotelRepository(BaseRepository):
 
             # Lấy phần còn thiếu từ Firestore
             for i in range(0, len(missing_tokens), MAX_IN_QUERY):
+                chunk_tokens = missing_tokens[i : i + MAX_IN_QUERY]
 
-                chunk_tokens = missing_tokens[i:i + MAX_IN_QUERY]
+                doc_refs = [self._collection.document(token) for token in chunk_tokens]
 
-                doc_refs = [
-                    self._collection.document(token)
-                    for token in chunk_tokens
-                ]
-
-                docs = [
-                    doc async for doc in self._db.get_all(doc_refs)
-                ]
+                docs = [doc async for doc in self._db.get_all(doc_refs)]
 
                 cache_payload = {}
 
@@ -309,9 +304,7 @@ class HotelRepository(BaseRepository):
 
                         hotels[doc.id] = hotel
 
-                        cache_payload[
-                            self._build_cache_key("id", doc.id)
-                        ] = data
+                        cache_payload[self._build_cache_key("id", doc.id)] = data
 
                     except PydanticValidationError as e:
                         logger.error(
@@ -327,7 +320,7 @@ class HotelRepository(BaseRepository):
             hotels = {}
 
         return hotels
-    
+
     async def get_places(self, place_ids: list[str]) -> list[HotelDocument]:
         """Lấy thông tin nhiều địa điểm (places) dựa trên place_ids.
 

@@ -1,3 +1,5 @@
+import asyncio
+
 from loguru import logger
 
 from core.cache import cache_get, cache_key, cache_set
@@ -41,12 +43,20 @@ class DiscoverService:
         return result.data or []
 
     async def get_reviews(self, hotels: list[DiscoverHotel]):
-        """Lấy review cho từng khách sạn"""
-        for hotel in hotels:
+        async def process_hotel(hotel):
             if len(hotel.user_reviews) > 0:
-                continue
+                return
 
-            virtual_review_manager.add_random_reviews(hotel, min_count=3, max_count=5)
+            await asyncio.to_thread(
+                virtual_review_manager.add_random_reviews,
+                hotel,
+                min_count=3,
+                max_count=10,
+            )
+
+        tasks = [process_hotel(hotel) for hotel in hotels]
+        await asyncio.gather(*tasks)
+
         # XXX: hơi chậm
 
     async def execute_discover_pipeline(self) -> DiscoverResponse:
