@@ -2,10 +2,10 @@ import asyncio
 
 from google.cloud import firestore as fs
 from google.cloud.firestore_v1.base_query import FieldFilter
-from schemas.user_preference_schema import UserTravelPreference, UserTravelPreferenceUpdateRequest
 from loguru import logger
 from pydantic import ValidationError as PydanticValidationError
 
+from core.cache import cache_delete
 from core.exceptions import (
     BadRequestError,
     DatabaseError,
@@ -13,6 +13,10 @@ from core.exceptions import (
     ValidationError,
 )
 from repositories.base_repo import BaseRepository
+from schemas.user_preference_schema import (
+    UserTravelPreference,
+    UserTravelPreferenceUpdateRequest,
+)
 from schemas.user_schema import SavedCollectionDocument, UserCreateRequest, UserDocument
 
 
@@ -71,14 +75,9 @@ class UserRepository(BaseRepository):
 
         unique_uids = list(set(uids))
         # Cache lookup
-        cache_keys = {
-            uid: self._build_cache_key("id", uid)
-            for uid in unique_uids
-        }
+        cache_keys = {uid: self._build_cache_key("id", uid) for uid in unique_uids}
 
-        cached_items = await self._get_many_from_cache(
-            list(cache_keys.values())
-        )
+        cached_items = await self._get_many_from_cache(list(cache_keys.values()))
 
         result: dict[str, UserDocument] = {}
         missing_uids = []
@@ -109,9 +108,7 @@ class UserRepository(BaseRepository):
         for i in range(0, len(missing_uids), chunk_size):
             chunk = missing_uids[i : i + chunk_size]
 
-            query = self._collection.where(
-                filter=FieldFilter("uid", "in", chunk)
-            ).get()
+            query = self._collection.where(filter=FieldFilter("uid", "in", chunk)).get()
 
             tasks.append(query)
 
@@ -130,9 +127,7 @@ class UserRepository(BaseRepository):
                     user_data["uid"] = doc.id
                     try:
                         result[doc.id] = UserDocument.model_validate(user_data)
-                        cache_payload[
-                            self._build_cache_key("id", doc.id)
-                        ] = user_data
+                        cache_payload[self._build_cache_key("id", doc.id)] = user_data
                     except PydanticValidationError as e:
                         logger.error(
                             f"Error validating user data for uid {doc.id}: {str(e)}"
@@ -145,11 +140,11 @@ class UserRepository(BaseRepository):
             logger.exception("Error fetching users")
 
         return result
-    
+
     async def update_user(self, uid: str, update_data: dict) -> None:
         # NOTE: Để service xử lý exceptions
         await self._update(uid, update_data)
-    
+
     async def get_travel_preference(self, uid: str) -> UserTravelPreference:
         """Lấy travel_profile field từ document user."""
         user_doc = await self.get_user(uid)
@@ -162,8 +157,10 @@ class UserRepository(BaseRepository):
             return preference
 
         return UserTravelPreference.model_validate(preference)
-    
-    async def update_travel_preference(self, uid: str, preference: UserTravelPreferenceUpdateRequest) -> UserTravelPreference:
+
+    async def update_travel_preference(
+        self, uid: str, preference: UserTravelPreferenceUpdateRequest
+    ) -> UserTravelPreference:
         """Ghi hoặc cập nhật travel_profile cho user."""
         payload = preference.model_dump(exclude_none=True)
 
@@ -172,7 +169,7 @@ class UserRepository(BaseRepository):
 
         await self._update(uid, {"travel_profile": payload})
         return UserTravelPreference.model_validate(payload)
-    
+
     async def delete_travel_preference(self, uid: str) -> bool:
         """Xóa travel_profile của user."""
         user_dict = await self._get_by_id(uid)
@@ -247,6 +244,10 @@ class UserRepository(BaseRepository):
         if len(uids) != len(update_data):
             raise ValidationError("Mismatch between number of user IDs and update data")
 
+        # Xoá cache trước khi cập nhật
+        cache_keys = [self._build_cache_key("id", uid) for uid in uids]
+        await cache_delete(*cache_keys)
+
         now = self._current_timestamp
         for data in update_data:
             data["last_updated"] = now
@@ -308,6 +309,7 @@ class UserRepository(BaseRepository):
         )
 
         await self._commit_batch(batch)
+        await cache_delete(self._build_cache_key("id", requester_uid))
 
         return True
 
@@ -332,6 +334,7 @@ class UserRepository(BaseRepository):
         )
 
         await self._commit_batch(batch)
+        await cache_delete(self._build_cache_key("id", requester_uid))
 
         return True
 

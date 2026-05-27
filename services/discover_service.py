@@ -135,6 +135,24 @@ class DiscoverService:
                 db_hotel = hotel_dict[hotel.property_token]
                 db_hotel.price = hotel.price
                 db_hotel.deal = hotel.deal
+                # optional: một số trường ko quan trọng nhưng có thể update nếu SerpAPI có dữ liệu mới, ví dụ description, link, images
+                optional_update_fields = [
+                    "description",
+                    "link",
+                    "images",
+                    "address",
+                    "phone",
+                    "amenities",
+                    "check_in_time",
+                    "check_out_time",
+                ]
+
+                for field in optional_update_fields:
+                    setattr(
+                        db_hotel,
+                        field,
+                        getattr(hotel, field) or getattr(db_hotel, field),
+                    )
 
         raw_results = list(hotel_dict.values())
 

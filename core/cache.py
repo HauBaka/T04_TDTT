@@ -132,7 +132,6 @@ async def cache_mset(
 
 
 async def cache_delete(*keys: str) -> None:
-    _debug(f"PENDING CACHE DELETE: {keys}")
     try:
         redis = get_redis()
 

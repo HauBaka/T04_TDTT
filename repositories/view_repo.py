@@ -4,7 +4,7 @@ from google.cloud import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 from loguru import logger
 
-from core.cache import cache_key, cache_update_fields
+from core.cache import cache_get, cache_key, cache_set, cache_update_fields
 from repositories.base_repo import BaseRepository
 from schemas.collection_schema import CollectionDocument, CollectionVisibility
 from schemas.discover_schema import HotelDocument
@@ -93,7 +93,6 @@ class ViewRepository(BaseRepository):
             update_data,
         )
 
-
     async def get_top_views(
         self,
         target_type: ViewTargetType,
@@ -107,6 +106,21 @@ class ViewRepository(BaseRepository):
         iso = now.isocalendar()
         cur_year = iso[0]
         cur_week = iso[1]
+        model_class = MODEL_MAP.get(target_type)
+        if not model_class:
+            return []
+
+        cache_id = cache_key(
+            "top_views",
+            target_type.value,
+            top_type.value,
+            str(page),
+            str(limit),
+        )
+        cached = await cache_get(cache_id)
+
+        if cached is not None:
+            return [model_class.model_validate(item) for item in cached]
 
         query = db.collection(target_type.value)
         if target_type == ViewTargetType.COLLECTION:
@@ -141,6 +155,12 @@ class ViewRepository(BaseRepository):
             model_class = MODEL_MAP.get(target_type)
             if model_class:
                 results.append(model_class.model_validate(data))
+
+        await cache_set(
+            cache_id,
+            [item.model_dump(mode="json") for item in results],
+            ttl_seconds=300,
+        )
 
         return results
 
