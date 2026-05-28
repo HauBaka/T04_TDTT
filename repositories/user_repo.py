@@ -47,7 +47,7 @@ class UserRepository(BaseRepository):
             username_lower=user_request.username_lower,
             email=user_request.email,
             display_name=user_request.display_name,
-            avatar_url=user_request.avatar_url,
+            avatar_url="https://cdn.haubaka.xyz/default/user_avatar.png",
             bio=user_request.bio,
             liked_collection=user_request.liked_collection,
             chatbot_conversation=user_request.chatbot_conversation,

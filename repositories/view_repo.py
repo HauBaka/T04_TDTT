@@ -159,7 +159,7 @@ class ViewRepository(BaseRepository):
         await cache_set(
             cache_id,
             [item.model_dump(mode="json") for item in results],
-            ttl_seconds=300,
+            ttl_seconds=60*15,
         )
 
         return results

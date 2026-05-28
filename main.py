@@ -64,7 +64,10 @@ app = FastAPI(lifespan=lifespan)
 app.state.limiter = limiter
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://app.haubaka.xyz",
+        "http://localhost:5173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

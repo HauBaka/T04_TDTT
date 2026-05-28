@@ -34,8 +34,8 @@ class AuthenticationService:
             
             # Tạo collection "Liked" mặc định và lấy ID
             liked_req = CollectionCreateRequest(
-                name="Liked", 
-                description="Your liked accommodations", 
+                name="Đã thích", 
+                description="Những địa điểm bạn đã thích", 
                 tags = [],
                 visibility=CollectionVisibility.PRIVATE,
                 thumbnail_url=None
@@ -94,4 +94,4 @@ class AuthenticationService:
 
 
     def _generate_display_name(self) -> str:
-        return f"Booking4U {uuid.uuid4().hex[:6]}"
+        return f"Lodgy4U {uuid.uuid4().hex[:6]}"

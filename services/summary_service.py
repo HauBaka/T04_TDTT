@@ -197,6 +197,7 @@ class SummaryService:
 
             if ai_summary and expiration_date and now < expiration_date:
                 # Nếu đã có tóm tắt và còn hạn, không cần gọi AI
+                print(f"Hotel '{hotel_name}' has valid AI summary, skipping AI generation.")
                 continue
 
             weather_key = hotel_ranking_service._hotel_weather_key(place)

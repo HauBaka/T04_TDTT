@@ -1,3 +1,5 @@
+from email.mime import text
+
 import httpx
 import pygeohash as pgh
 from loguru import logger
@@ -56,6 +58,8 @@ class VietMapAPI:
             logger.warning(
                 f"Failed to get place details from VietMap for ref_id {ref_id}: HTTP {response.status_code} - {response.text}"
             )
+        except httpx.ConnectTimeout:
+            logger.error(f"VietMap connect timeout for text={text}")
         except httpx.ReadTimeout:
             logger.error(f"VietMap timeout for ref_id={ref_id}")
         except Exception as e:
@@ -99,6 +103,8 @@ class VietMapAPI:
                 f"VietMap autocomplete failed for text={text}: "
                 f"HTTP {response.status_code} - {response.text}"
             )
+        except httpx.ConnectTimeout:
+            logger.error(f"VietMap connect timeout for text={text}")
         except httpx.ReadTimeout:
             logger.error(f"VietMap timeout for text={text}")
         except Exception as e:

@@ -119,7 +119,9 @@ class DiscoverService:
         )
         # Dùng SerpAPI
         serpapi_results = await self.raw_search()
-
+        logger.info(
+            f"SerpAPI returned {len(serpapi_results)} hotels, DB returned {len(raw_results)} hotels for address: {self.payload.address}"
+        )
         hotel_dict: dict[str, DiscoverHotel] = {}  # Gộp 2 kết quả
         for hotel in raw_results:
             if hotel.property_token:

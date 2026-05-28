@@ -13,11 +13,11 @@ from slowapi.errors import RateLimitExceeded
 from core.settings import settings
 
 RATE_LIMITS = {
-    "auth": "5/minute",
-    "chat": "20/minute",
-    "search": "60/minute",
-    "upload": "5/minute",
-    "default": "100/minute",
+    "auth": "500/minute",
+    "chat": "2000/minute",
+    "search": "6000/minute",
+    "upload": "500/minute",
+    "default": "10000/minute",
 }
 
 ROUTE_GROUPS = {
@@ -45,7 +45,6 @@ def uid_then_ip_key(request: Request) -> str:
 
 limiter = Limiter(
     key_func=uid_then_ip_key,
-    storage_uri=settings.REDIS_URL,
 )
 
 

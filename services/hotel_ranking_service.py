@@ -1214,6 +1214,7 @@ class HotelRankingService:
                 if existing_notes
                 else personality_note
             )
+            logger.debug(f"Đã thêm personality note vào profile: {profile.notes}")
 
         # trip_criteria đã được chuẩn hoá và đồng bộ trong DiscoverRequest validator.
         trip_criteria = (

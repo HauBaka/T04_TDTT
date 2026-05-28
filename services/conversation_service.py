@@ -446,7 +446,7 @@ class ConversationService:
             conv = await self.conversation_repository.get_by_id(chatbot_conv_id)
         except NotFoundError:
             new_conv = ConversationCreateRequest(
-                name="Chatbot Assistant", description="Trợ lý AI cá nhân của bạn"
+                name="Trợ lý AI", description="Trợ lý AI cá nhân của bạn"
             )
             conv = await self.conversation_repository.create(
                 uid, new_conv, custom_id=chatbot_conv_id
