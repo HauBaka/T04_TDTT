@@ -4,7 +4,7 @@ from externals.PhoBERT import PhoBERT
 import re
 import logging
 import asyncio
-from schemas.discover_schema import AISentimentResult, AnalyzedReview, DiscoverHotel, UserReview
+from schemas.discover_schema import AISentimentResult, DiscoverHotel, UserReview
 
 logger = logging.getLogger(__name__)
 REAL_RATING_CACHE_EXPIRATION_DAYS=7
@@ -52,16 +52,15 @@ class SentimentService:
 
         return False
 
-    async def calculate_real_rating(self, raw_reviews: list[UserReview]) -> tuple[float, float, list[AnalyzedReview]]:
+    async def calculate_real_rating(self, raw_reviews: list[UserReview]) -> tuple[float, float]:
         """
         Hàm này nhận vào danh sách review gốc (mỗi review là UserReview có text và raw_stars) và trả về:
         - Điểm đánh giá thực tế đã được điều chỉnh (float)
         - Trọng số tin cậy trung bình của các review (float)
-        - Danh sách review đã được phân tích chi tiết (list of AnalyzedReview)
         """
         
         if not raw_reviews:
-            return 0.0, 0.0, []
+            return 0.0, 0.0
 
         # 1. Tách dữ liệu để xử lí song song với asyncio
         texts = [rev.text for rev in raw_reviews]
@@ -86,7 +85,6 @@ class SentimentService:
         else:
             sentiment_scores = [3.0] * len(texts)
 
-        analyzed_list = []
         total_weighted_stars = 0.0
         total_weight = 0.0
 
@@ -114,15 +112,9 @@ class SentimentService:
             adjusted_stars = round(min(max(adjusted_stars, 1.0), 5.0), 1)
 
             # Cập nhật kết quả
-            analyzed_list.append(
-                AnalyzedReview(
-                    text=text,
-                    raw_stars=raw_stars,
-                    sentiment_score=sentiment_score,
-                    trust_weight=trust_weight,
-                    adjusted_stars=adjusted_stars
-                )
-            )
+            rev.sentiment_score = sentiment_score
+            rev.trust_weight = trust_weight
+            rev.adjusted_stars = adjusted_stars
 
             total_weighted_stars += adjusted_stars * trust_weight
             total_weight += trust_weight
@@ -131,7 +123,7 @@ class SentimentService:
         final_real_rating = total_weighted_stars / total_weight if total_weight > 0 else 0.0
         avg_trust = total_weight / len(raw_reviews)
 
-        return round(final_real_rating, 2), round(avg_trust, 2), analyzed_list
+        return round(final_real_rating, 2), round(avg_trust, 2)
     
     async def process_places_real_rating(self, filtered_places: list[DiscoverHotel]):
         """
@@ -151,7 +143,7 @@ class SentimentService:
         for place in filtered_places:
             sentiment_meta = place.ai_sentiment
             expiration_date = sentiment_meta.ai_score_expiration_date if sentiment_meta else None
-            has_cache = bool(sentiment_meta and sentiment_meta.analyzed_reviews) # Đã có AI review chưa
+            has_cache = bool(sentiment_meta and sentiment_meta.ai_score is not None) # Đã có AI review chưa
 
             if has_cache and (expiration_date and now < expiration_date):
                 # Nếu đã có ai review và còn hạn, thì không cần tính lại
@@ -166,7 +158,6 @@ class SentimentService:
                 place.ai_sentiment.ai_score = place.raw_rating
                 place.ai_sentiment.ai_score_expiration_date = now + timedelta(days=REAL_RATING_CACHE_EXPIRATION_DAYS)
                 place.ai_sentiment.trust_weight = 0.0 # Không có review nào -> không đáng tin cậy
-                place.ai_sentiment.analyzed_reviews = []
                 continue
 
             # Đưa vào hàng đợi để gọi AI xử lí song song
@@ -187,17 +178,15 @@ class SentimentService:
                     place.ai_sentiment.ai_score = place.raw_rating
                     place.ai_sentiment.ai_score_expiration_date = now
                     place.ai_sentiment.trust_weight = 0.0
-                    place.ai_sentiment.analyzed_reviews = []
                     continue
 
                 # Gán kết quả AI vào Place
-                real_rating, trust_weight, analyzed_reviews = result
+                real_rating, trust_weight = result
                 if place.ai_sentiment is None:
                     place.ai_sentiment = AISentimentResult()
                 place.ai_sentiment.ai_score = real_rating
                 place.ai_sentiment.ai_score_expiration_date = new_expiration_date
                 place.ai_sentiment.trust_weight = trust_weight
-                place.ai_sentiment.analyzed_reviews = analyzed_reviews
     
 
 sentiment_service = SentimentService()

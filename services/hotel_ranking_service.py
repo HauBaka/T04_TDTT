@@ -1,32 +1,34 @@
 from __future__ import annotations
 
+import asyncio
 import math
 import re
-import asyncio
 import unicodedata
 from dataclasses import dataclass
-from functools import lru_cache
 from datetime import datetime, timezone
+from functools import lru_cache
 from typing import Iterable
 
 from loguru import logger
 
-from schemas.collection_schema import CollectionPublic
+from externals.SemanticModel import semantic_model_client
+from repositories.collection_repo import collection_repo
+from repositories.user_repo import user_repo
+from schemas.collection_schema import CollectionDocument
 from schemas.discover_schema import DiscoverHotel, DiscoverRequest, WeatherInfo
 from schemas.hotel_ranking_schema import (
     HotelRankingItem,
     HotelRankingRequest,
     HotelRankingResponse,
 )
-from schemas.trip_context_schema import TripSearchCriteria, TravelStyle
+from schemas.trip_context_schema import TravelStyle, TripSearchCriteria
+from schemas.user_behavior_schema import UserBehaviorEventDocument, UserEventType
 from schemas.user_preference_schema import (
     ScoringWeights,
-    UserBehaviorEvent,
-    UserEventType,
     UserTravelPreference,
     WeatherTolerance,
 )
-from repositories.user_repo import user_repo
+from services.behavior_service import behavior_service
 from services.semantic_encoder import semantic_text_encoder
 
 # Map tiếng anh sang tiếng việt (nếu đầu vào lỡ tiếng anh)
@@ -80,6 +82,8 @@ SINH_NGHIA_MAP = {
 
 _NON_WORD_RE = re.compile(r"[^\w\s]+", flags=re.UNICODE)
 _MULTI_SPACE_RE = re.compile(r"\s+")
+_ALPHA_TOKEN_RE = re.compile(r"[a-z]")
+_MODEL_MIN_TOKEN_LEN = 2
 _SINH_NGHIA_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = tuple(
     (
         re.compile(rf"\b{re.escape(english_phrase)}\b", flags=re.UNICODE),
@@ -108,6 +112,7 @@ def _strip_vietnamese_diacritics(text: str) -> str:
         if unicodedata.category(char) not in {"Mn", "Mc", "Me"}
     )
 
+
 # hàm này để làm bình thường hóa text trước khi so sánh, giúp giảm thiểu sự khác biệt về cách diễn đạt (ví dụ: "phòng gia đình" vs "family room")
 @lru_cache(maxsize=4096)
 def normalize_text(text: str) -> str:
@@ -124,18 +129,70 @@ def normalize_text(text: str) -> str:
 
     return cleaned
 
-# Tách text thành tokens sau khi đã được normalize, dùng để so sánh với các tập token của khách sạn, bộ sưu tập, sự kiện lịch sử,..
+
 @lru_cache(maxsize=4096)
-def tokenize_text(text: str) -> tuple[str, ...]:
+def _model_tokenize_text(text: str) -> tuple[str, ...]:
     normalized = normalize_text(text)
     if not normalized:
         return tuple()
-    return tuple(normalized.split())
+
+    try:
+        semantic_model_client.load_model()
+        tokenizer = semantic_model_client.tokenizer
+    except Exception as exc:
+        logger.warning(f"Không bật được model tokenizer cho ranking: {str(exc)}")
+        return tuple()
+
+    try:
+        pieces = tokenizer.tokenize(normalized)
+    except Exception:
+        return tuple()
+
+    tokens: list[str] = []
+    for piece in pieces:
+        cleaned_piece = piece.replace("##", "").replace("▁", " ").strip()
+        cleaned_piece = _NON_WORD_RE.sub(" ", cleaned_piece)
+        cleaned_piece = _MULTI_SPACE_RE.sub(" ", cleaned_piece).strip()
+        if not cleaned_piece:
+            continue
+        for word in cleaned_piece.split():
+            if len(word) < _MODEL_MIN_TOKEN_LEN:
+                continue
+            if not _ALPHA_TOKEN_RE.search(word):
+                continue
+            tokens.append(word)
+
+    return tuple(dict.fromkeys(tokens))
+
+
+# Tách text thành tokens sau khi đã được normalize, dùng để so sánh với các tập token của khách sạn, bộ sưu tập, sự kiện lịch sử,..
+@lru_cache(maxsize=4096)
+def tokenize_text(text: str, use_model_tokens: bool = False) -> tuple[str, ...]:
+    normalized = normalize_text(text)
+    if not normalized:
+        return tuple()
+
+    words = [word for word in normalized.split() if word]
+    if not words:
+        return tuple()
+
+    # Giữ unigram như cũ, thêm bigram để tăng khả năng match cụm từ ngắn.
+    tokens: list[str] = list(words)
+    tokens.extend(f"{left} {right}" for left, right in zip(words, words[1:]))
+
+    # Chỉ trộn token model cho text tự do để giảm nhiễu lên field có cấu trúc.
+    if use_model_tokens:
+        tokens.extend(_model_tokenize_text(text))
+
+    # Loại trùng nhưng giữ thứ tự xuất hiện để đảm bảo kết quả ổn định.
+    return tuple(dict.fromkeys(tokens))
+
 
 # Lớp lưu trữ các tín hiệu liên quan đến khách sạn được sử dụng trong quá trình xếp hạng.
 @dataclass(frozen=True)
 class HotelSignal:
     """Precomputed hotel features used by multiple scorers."""
+
     hotel: DiscoverHotel
     identity: str
     feature_tokens: frozenset[str]
@@ -143,10 +200,9 @@ class HotelSignal:
     amenity_tokens: frozenset[str]
     semantic_text: str
 
+
 # Dịch vụ xếp hạng khách sạn dựa trên nhiều tín hiệu: đánh giá thực tế, sự phù hợp với hồ sơ người dùng, sự liên quan đến bộ sưu tập đã lưu, lịch sử tương tác, và sự phù hợp với điều kiện thời tiết dự kiến.
 class HotelRankingService:
-    SINH_NGHIA = SINH_NGHIA_MAP
-
     # Nhóm đồng nghĩa tiện ích ưu tiên cách gọi tiếng Việt.
     AMENITY_SYNONYMS: dict[str, set[str]] = {
         "wifi": {"wi fi", "mang", "mang khong day", "wifi mien phi", "internet"},
@@ -162,22 +218,70 @@ class HotelRankingService:
         "tre em": {"khu vui choi tre em", "cau lac bo tre em", "than thien voi tre em"},
     }
 
-    TIEN_ICH_GIA_DINH = {"phong gia dinh", "phu hop gia dinh", "an sang", "ho boi", "tre em", "cau lac bo tre em", "noi em be", "khu spa"}
-    TIEN_ICH_CONG_TAC = {"wifi", "trung tam doanh nghiep", "ban lam viec", "phong hop", "yen tinh", "giat ui"}
-    TIEN_ICH_NGHI_DUONG = {"khu spa", "ho boi", "massage", "bai bien", "phong tap", "khu nghi duong", "xong hoi"}
-    GOI_Y_DIEM_DEN = {"bai bien", "dao", "ho", "cong vien", "doi nui", "thien nhien", "diem ngam", "khu tham quan", "trung tam", "trung tam thanh pho", "pho co", "bao tang", "cho"}
-    TIEN_ICH_TRONG_NHA = {"khu spa", "phong tap", "nha hang", "quan bar", "trung tam doanh nghiep", "giat ui", "ho boi trong nha", "phong hop", "quan cafe", "an sang"}
-    
+    TIEN_ICH_GIA_DINH = {
+        "phong gia dinh",
+        "phu hop gia dinh",
+        "an sang",
+        "ho boi",
+        "tre em",
+        "cau lac bo tre em",
+        "noi em be",
+        "khu spa",
+    }
+    TIEN_ICH_CONG_TAC = {
+        "wifi",
+        "trung tam doanh nghiep",
+        "ban lam viec",
+        "phong hop",
+        "yen tinh",
+        "giat ui",
+    }
+    TIEN_ICH_NGHI_DUONG = {
+        "khu spa",
+        "ho boi",
+        "massage",
+        "bai bien",
+        "phong tap",
+        "khu nghi duong",
+        "xong hoi",
+    }
+    GOI_Y_DIEM_DEN = {
+        "bai bien",
+        "dao",
+        "ho",
+        "cong vien",
+        "doi nui",
+        "thien nhien",
+        "diem ngam",
+        "khu tham quan",
+        "trung tam",
+        "trung tam thanh pho",
+        "pho co",
+        "bao tang",
+        "cho",
+    }
+    TIEN_ICH_TRONG_NHA = {
+        "khu spa",
+        "phong tap",
+        "nha hang",
+        "quan bar",
+        "trung tam doanh nghiep",
+        "giat ui",
+        "ho boi trong nha",
+        "phong hop",
+        "quan cafe",
+        "an sang",
+    }
+
     # Trọng số mặc định cho từng loại sự kiện hành vi của người dùng, dùng để điều chỉnh điểm cá nhân hóa dựa trên mức độ tương tác.
     EVENT_WEIGHTS = {
         UserEventType.VIEW: 0.10,
-        UserEventType.CLICK: 0.25,
-        UserEventType.SAVE: 0.60,
-        UserEventType.BOOK: 1.00,
-        UserEventType.RATE: 0.75,
-        UserEventType.REMOVE: -0.40,
+        UserEventType.SAVE_PLACE: 0.60,
+        UserEventType.REMOVE_PLACE: -0.40,
+        UserEventType.SAVE_COLLECTION: 0.50,
+        UserEventType.REMOVE_COLLECTION: -0.30,
     }
-    
+
     # Tính chất chuyến đi của người dùng
     STYLE_LABELS = {
         TravelStyle.RELAX: "nghỉ dưỡng",
@@ -193,25 +297,42 @@ class HotelRankingService:
     def __init__(self):
         self.semantic_encoder = semantic_text_encoder
         self._amenity_alias_index = self._build_alias_index(self.AMENITY_SYNONYMS)
-        
+
     # Xếp hạng khách sạn bất đồng bộ để không chặn event loop.
     async def rank_hotels(self, request: HotelRankingRequest) -> HotelRankingResponse:
         ranked_hotels = await asyncio.to_thread(self._rank_hotels_sync, request)
         return HotelRankingResponse(ranked_hotels=ranked_hotels)
-    
+
     # Chạy xếp hạng chính trong thread riêng và trả về danh sách đã sắp thứ tự.
     def _rank_hotels_sync(self, request: HotelRankingRequest) -> list[HotelRankingItem]:
         if not request.hotels:
             return []
 
         representative_weather = next(iter(request.weather_by_identity.values()), None)
-        weights = self._resolve_weights(request.weights, request.profile, request.trip_criteria, request.collections, request.history, representative_weather)
+        weights = self._resolve_weights(
+            request.weights,
+            request.profile,
+            request.trip_criteria,
+            request.collections,
+            request.history,
+            representative_weather,
+        )
         ranked_hotels: list[HotelRankingItem] = []
 
         for hotel in request.hotels:
             signal = self._build_hotel_signal(hotel)
-            hotel_weather = request.weather_by_identity.get(self._hotel_weather_key(signal.hotel))
-            component_scores = self._score_hotel(signal, request.profile, request.trip_criteria, request.collections, request.history, hotel_weather, weights)
+            hotel_weather = request.weather_by_identity.get(
+                self._hotel_weather_key(signal.hotel)
+            )
+            component_scores = self._score_hotel(
+                signal,
+                request.profile,
+                request.trip_criteria,
+                request.collections,
+                request.history,
+                hotel_weather,
+                weights,
+            )
             final_score = self._combine_scores(component_scores, weights)
             ranked_hotels.append(
                 HotelRankingItem(
@@ -228,15 +349,15 @@ class HotelRankingService:
             item.rank = index
 
         return ranked_hotels
-    
+
     # Tự cân lại trọng số theo dữ liệu đầu vào của request.
     def _resolve_weights(
         self,
         user_weights: ScoringWeights | None,
         profile: UserTravelPreference,
         trip_criteria: TripSearchCriteria | None,
-        collections: list[CollectionPublic],
-        history: list[UserBehaviorEvent],
+        collections: list[CollectionDocument],
+        history: list[UserBehaviorEventDocument],
         weather: list[WeatherInfo] | None,
     ) -> ScoringWeights:
         if user_weights:
@@ -269,7 +390,10 @@ class HotelRankingService:
             weights.profile_match += 0.03
 
         if trip_criteria is not None:
-            if trip_criteria.budget_min is not None or trip_criteria.budget_max is not None:
+            if (
+                trip_criteria.budget_min is not None
+                or trip_criteria.budget_max is not None
+            ):
                 weights.trip_match += 0.08
             if trip_criteria.trip_style is not None:
                 weights.trip_match += 0.08
@@ -280,7 +404,7 @@ class HotelRankingService:
             weights.trip_match -= 0.10
 
         return self._normalize_weights(weights)
-    
+
     # Chuẩn hóa trọng số để tổng luôn bằng 1.
     def _normalize_weights(self, weights: ScoringWeights) -> ScoringWeights:
         weights = ScoringWeights(
@@ -291,7 +415,14 @@ class HotelRankingService:
             history_affinity=max(0.0, weights.history_affinity),
             weather_fit=max(0.0, weights.weather_fit),
         )
-        total = weights.real_rating + weights.profile_match + weights.trip_match + weights.collection_affinity + weights.history_affinity + weights.weather_fit
+        total = (
+            weights.real_rating
+            + weights.profile_match
+            + weights.trip_match
+            + weights.collection_affinity
+            + weights.history_affinity
+            + weights.weather_fit
+        )
         if total <= 0:
             return ScoringWeights()
         return ScoringWeights(
@@ -302,15 +433,15 @@ class HotelRankingService:
             history_affinity=round(weights.history_affinity / total, 4),
             weather_fit=round(weights.weather_fit / total, 4),
         )
-        
+
     # Tính từng điểm thành phần trước khi ghép thành score cuối.
     def _score_hotel(
         self,
         signal: HotelSignal,
         profile: UserTravelPreference,
         trip_criteria: TripSearchCriteria | None,
-        collections: list[CollectionPublic],
-        history: list[UserBehaviorEvent],
+        collections: list[CollectionDocument],
+        history: list[UserBehaviorEventDocument],
         weather: list[WeatherInfo] | None,
         weights: ScoringWeights,
     ) -> dict[str, float]:
@@ -331,9 +462,11 @@ class HotelRankingService:
             "weather_fit": weather_fit,
             "confidence": confidence,
         }
-        
+
     # Ghép các điểm thành phần theo trọng số rồi nhân thêm độ tin cậy.
-    def _combine_scores(self, component_scores: dict[str, float], weights: ScoringWeights) -> float:
+    def _combine_scores(
+        self, component_scores: dict[str, float], weights: ScoringWeights
+    ) -> float:
         blended = (
             component_scores["real_rating"] * weights.real_rating
             + component_scores["profile_match"] * weights.profile_match
@@ -347,11 +480,13 @@ class HotelRankingService:
     # Chấm điểm rating thực tế của khách sạn.
     def _real_rating_score(self, hotel: DiscoverHotel) -> float:
         sentiment = hotel.ai_sentiment
-        ai_score = sentiment.ai_score if sentiment and sentiment.ai_score is not None else 0.0
+        ai_score = (
+            sentiment.ai_score if sentiment and sentiment.ai_score is not None else 0.0
+        )
         if ai_score <= 0:
             return 0.5
         return self._clamp(ai_score / 5.0, 0.0, 1.0)
-    
+
     # Chấm mức khớp giữa khách sạn và sở thích bền vững của người dùng.
     def _profile_match_score(
         self,
@@ -361,22 +496,30 @@ class HotelRankingService:
         score = 0.0
         total = 0.0
 
-        semantic_score = self._semantic_similarity(self._profile_semantic_text(profile), signal.semantic_text)
+        semantic_score = self._semantic_similarity(
+            self._profile_semantic_text(profile), signal.semantic_text
+        )
 
         if profile.preferred_amenities:
             total += 1.0
-            score += self._amenity_overlap_score(profile.preferred_amenities, signal.amenity_tokens)
+            score += self._amenity_overlap_score(
+                profile.preferred_amenities, signal.amenity_tokens
+            )
 
         if profile.must_have_amenities:
             total += 1.0
-            if self._amenity_contains_all(profile.must_have_amenities, signal.amenity_tokens):
+            if self._amenity_contains_all(
+                profile.must_have_amenities, signal.amenity_tokens
+            ):
                 score += 1.0
             else:
                 score += 0.15
 
         if profile.excluded_amenities:
             total += 1.0
-            if self._amenity_contains_any(profile.excluded_amenities, signal.amenity_tokens):
+            if self._amenity_contains_any(
+                profile.excluded_amenities, signal.amenity_tokens
+            ):
                 score += 0.1
             else:
                 score += 1.0
@@ -384,9 +527,13 @@ class HotelRankingService:
         location_tags = signal.location_tags
         if profile.preferred_location_tags:
             total += 1.0
-            score += self._keyword_overlap_score(profile.preferred_location_tags, list(location_tags))
+            score += self._keyword_overlap_score(
+                profile.preferred_location_tags, list(location_tags)
+            )
 
-        if profile.disliked_location_tags and self._contains_any(profile.disliked_location_tags, list(location_tags)):
+        if profile.disliked_location_tags and self._contains_any(
+            profile.disliked_location_tags, list(location_tags)
+        ):
             total += 1.0
             score += 0.2
 
@@ -401,17 +548,26 @@ class HotelRankingService:
         return self._blend_rule_and_semantic(rule_score, semantic_score)
 
     # Chấm mức khớp theo tiêu chí của riêng chuyến đi.
-    def _trip_match_score(self, signal: HotelSignal, trip_criteria: TripSearchCriteria | None) -> float:
+    def _trip_match_score(
+        self, signal: HotelSignal, trip_criteria: TripSearchCriteria | None
+    ) -> float:
         if trip_criteria is None:
             return 0.5
 
         score = 0.0
         total = 0.0
-        semantic_score = self._semantic_similarity(self._trip_semantic_text(trip_criteria), signal.semantic_text)
+        semantic_score = self._semantic_similarity(
+            self._trip_semantic_text(trip_criteria), signal.semantic_text
+        )
 
-        if trip_criteria.budget_min is not None and trip_criteria.budget_max is not None:
+        if (
+            trip_criteria.budget_min is not None
+            and trip_criteria.budget_max is not None
+        ):
             total += 1.0
-            score += self._budget_score(signal.hotel.price, trip_criteria.budget_min, trip_criteria.budget_max)
+            score += self._budget_score(
+                signal.hotel.price, trip_criteria.budget_min, trip_criteria.budget_max
+            )
 
         if trip_criteria.trip_style is not None:
             total += 1.0
@@ -420,9 +576,14 @@ class HotelRankingService:
         if trip_criteria.party_size is not None:
             total += 1.0
             if trip_criteria.party_size <= 2:
-                score += self._keyword_overlap_score({"phong suite", "lang man", "yen tinh"}, signal.feature_tokens)
+                score += self._keyword_overlap_score(
+                    {"phong suite", "lang man", "yen tinh"}, signal.feature_tokens
+                )
             elif trip_criteria.party_size >= 4:
-                score += self._keyword_overlap_score({"gia dinh", "tre em", "an sang", "khu nghi duong"}, signal.feature_tokens)
+                score += self._keyword_overlap_score(
+                    {"gia dinh", "tre em", "an sang", "khu nghi duong"},
+                    signal.feature_tokens,
+                )
             else:
                 score += 0.65
 
@@ -431,9 +592,11 @@ class HotelRankingService:
 
         rule_score = self._clamp(score / total, 0.0, 1.0)
         return self._blend_rule_and_semantic(rule_score, semantic_score)
-    
+
     # Chấm mức hợp với bộ sưu tập đã lưu của người dùng.
-    def _collection_affinity_score(self, signal: HotelSignal, collections: list[CollectionPublic]) -> float:
+    def _collection_affinity_score(
+        self, signal: HotelSignal, collections: list[CollectionDocument]
+    ) -> float:
         if not collections:
             return 0.5
 
@@ -442,8 +605,8 @@ class HotelRankingService:
         for collection in collections:
             collection_tokens = self._collection_tokens(collection)
             exact_match = any(
-                self._normalize_token(getattr(place, "place_id", "")) == signal.identity
-                for place in collection.places
+                self._normalize_token(pid) == signal.identity
+                for pid in (collection.place_ids or [])
             )
             if exact_match:
                 scores.append(1.0)
@@ -454,14 +617,23 @@ class HotelRankingService:
             scores.append(self._clamp(overlap * recency, 0.0, 1.0))
 
         if not scores:
-            return self._semantic_similarity(self._collections_semantic_text(collections), signal.semantic_text) or 0.5
+            return (
+                self._semantic_similarity(
+                    self._collections_semantic_text(collections), signal.semantic_text
+                )
+                or 0.5
+            )
 
         rule_score = round(sum(scores) / len(scores), 4)
-        semantic_score = self._semantic_similarity(self._collections_semantic_text(collections), signal.semantic_text)
+        semantic_score = self._semantic_similarity(
+            self._collections_semantic_text(collections), signal.semantic_text
+        )
         return self._blend_rule_and_semantic(rule_score, semantic_score)
-    
-    # Chấm mức hợp với lịch sử xem/lưu/đặt phòng trước đó.
-    def _history_affinity_score(self, signal: HotelSignal, history: list[UserBehaviorEvent]) -> float:
+
+    # Chấm mức hợp với lịch sử xem/lưu/xóa place hoặc collection.
+    def _history_affinity_score(
+        self, signal: HotelSignal, history: list[UserBehaviorEventDocument]
+    ) -> float:
         if not history:
             return 0.5
 
@@ -473,13 +645,17 @@ class HotelRankingService:
             if base_weight == 0.0:
                 continue
 
-            event_identity = self._normalize_token(event.hotel_id or event.hotel_name or "")
+            event_identity = self._normalize_token(
+                event.target_id or event.target_name or ""
+            )
             if event_identity and event_identity == signal.identity:
                 match_score = 1.0
             else:
                 event_tokens = self._event_tokens(event)
                 match_score = self._jaccard(event_tokens, signal.feature_tokens)
-                if event.hotel_name and self._normalize_token(event.hotel_name) == self._normalize_token(signal.hotel.name):
+                if event.target_name and self._normalize_token(
+                    event.target_name
+                ) == self._normalize_token(signal.hotel.name):
                     match_score = max(match_score, 0.85)
 
             recency = self._recency_weight(event.created_at)
@@ -487,14 +663,18 @@ class HotelRankingService:
             weighted_scores.append(adjusted)
 
         if not weighted_scores:
-            semantic_score = self._semantic_similarity(self._history_semantic_text(history), signal.semantic_text)
+            semantic_score = self._semantic_similarity(
+                self._history_semantic_text(history), signal.semantic_text
+            )
             return semantic_score if semantic_score is not None else 0.5
 
         average = sum(weighted_scores) / len(weighted_scores)
         rule_score = self._clamp(0.5 + average / 2.0, 0.0, 1.0)
-        semantic_score = self._semantic_similarity(self._history_semantic_text(history), signal.semantic_text)
+        semantic_score = self._semantic_similarity(
+            self._history_semantic_text(history), signal.semantic_text
+        )
         return self._blend_rule_and_semantic(rule_score, semantic_score)
-    
+
     # Chấm mức hợp với thời tiết dự kiến và sức chịu thời tiết của user.
     def _weather_fit_score(
         self,
@@ -512,19 +692,37 @@ class HotelRankingService:
         severity = self._weather_severity(weather, profile)
 
         if max_rain >= 80:
-            base = 0.25 if profile.weather_tolerance == WeatherTolerance.LOW else 0.5 if profile.weather_tolerance == WeatherTolerance.MEDIUM else 0.7
+            base = (
+                0.25
+                if profile.weather_tolerance == WeatherTolerance.LOW
+                else 0.5
+                if profile.weather_tolerance == WeatherTolerance.MEDIUM
+                else 0.7
+            )
             if indoor_support:
                 base += min(0.2, 0.05 * indoor_support)
             return self._clamp(base, 0.0, 1.0)
 
         if avg_temp >= 35:
-            base = 0.3 if profile.weather_tolerance == WeatherTolerance.LOW else 0.55 if profile.weather_tolerance == WeatherTolerance.MEDIUM else 0.75
+            base = (
+                0.3
+                if profile.weather_tolerance == WeatherTolerance.LOW
+                else 0.55
+                if profile.weather_tolerance == WeatherTolerance.MEDIUM
+                else 0.75
+            )
             if self._contains_any({"ho boi", "khu spa"}, hotel_tags):
                 base += 0.1
             return self._clamp(base, 0.0, 1.0)
 
         if max_rain >= 50:
-            base = 0.5 if profile.weather_tolerance == WeatherTolerance.LOW else 0.7 if profile.weather_tolerance == WeatherTolerance.MEDIUM else 0.8
+            base = (
+                0.5
+                if profile.weather_tolerance == WeatherTolerance.LOW
+                else 0.7
+                if profile.weather_tolerance == WeatherTolerance.MEDIUM
+                else 0.8
+            )
             if indoor_support:
                 base += 0.1
             return self._clamp(base, 0.0, 1.0)
@@ -536,19 +734,21 @@ class HotelRankingService:
             return self._clamp(base, 0.0, 1.0)
 
         return 0.7
-    
+
     # Chấm độ tin cậy của dữ liệu đầu vào cho khách sạn.
     def _confidence_score(self, hotel: DiscoverHotel) -> float:
         sentiment = hotel.ai_sentiment
-        ai_score = sentiment.ai_score if sentiment and sentiment.ai_score is not None else 0.0
-        analyzed_reviews = sentiment.analyzed_reviews if sentiment else []
+        ai_score = (
+            sentiment.ai_score if sentiment and sentiment.ai_score is not None else 0.0
+        )
+        user_reviews = hotel.user_reviews
         trust_weight = sentiment.trust_weight if sentiment else 0.0
-        review_density = min(1.0, len(analyzed_reviews) / 8.0)
+        review_density = min(1.0, len(user_reviews) / 8.0)
         trust = self._clamp(trust_weight, 0.0, 1.0)
-        if ai_score <= 0 and not analyzed_reviews:
+        if ai_score <= 0 and not user_reviews:
             return 0.55
         return self._clamp(0.55 + 0.25 * trust + 0.20 * review_density, 0.0, 1.0)
-    
+
     # Chấm điểm tinh chỉnh trong nhóm đã qua lọc budget.
     def _budget_score(self, price: float, budget_min: int, budget_max: int) -> float:
         if budget_min <= 0 and budget_max <= 0:
@@ -560,40 +760,65 @@ class HotelRankingService:
             return self._clamp(1.0 - (gap / max(budget_min, 1)) * 0.4, 0.0, 1.0)
         gap = price - budget_max
         return self._clamp(1.0 - (gap / max(budget_max, 1)) * 0.5, 0.0, 1.0)
-    
+
     # Chấm mức hợp với phong cách chuyến đi.
     def _trip_style_score(self, hotel: DiscoverHotel, trip_style: TravelStyle) -> float:
         tokens = self._hotel_feature_tokens(hotel) | self._hotel_location_tags(hotel)
 
         style_map = {
-            TravelStyle.FAMILY: self.TIEN_ICH_GIA_DINH | {"gia dinh", "tre em", "an sang"},
-            TravelStyle.WORK: self.TIEN_ICH_CONG_TAC | {"trung tam", "doanh nghiep", "phong hop"},
-            TravelStyle.RELAX: self.TIEN_ICH_NGHI_DUONG | {"khu nghi duong", "khu spa", "yen tinh"},
-            TravelStyle.EXPLORE: self.GOI_Y_DIEM_DEN | {"tham quan", "kham pha", "diem den"},
-            TravelStyle.ROMANTIC: {"khu spa", "yen tinh", "canh dep", "bai bien", "khu nghi duong", "ho boi"},
-            TravelStyle.LUXURY: {"khu spa", "ho boi", "phong suite", "sang trong", "khu nghi duong", "dich vu do xe", "cao cap"},
-            TravelStyle.BUDGET: {"tiet kiem", "gia re", "nha nghi", "don gian", "trung tam"},
+            TravelStyle.FAMILY: self.TIEN_ICH_GIA_DINH
+            | {"gia dinh", "tre em", "an sang"},
+            TravelStyle.WORK: self.TIEN_ICH_CONG_TAC
+            | {"trung tam", "doanh nghiep", "phong hop"},
+            TravelStyle.RELAX: self.TIEN_ICH_NGHI_DUONG
+            | {"khu nghi duong", "khu spa", "yen tinh"},
+            TravelStyle.EXPLORE: self.GOI_Y_DIEM_DEN
+            | {"tham quan", "kham pha", "diem den"},
+            TravelStyle.ROMANTIC: {
+                "khu spa",
+                "yen tinh",
+                "canh dep",
+                "bai bien",
+                "khu nghi duong",
+                "ho boi",
+            },
+            TravelStyle.LUXURY: {
+                "khu spa",
+                "ho boi",
+                "phong suite",
+                "sang trong",
+                "khu nghi duong",
+                "dich vu do xe",
+                "cao cap",
+            },
+            TravelStyle.BUDGET: {
+                "tiet kiem",
+                "gia re",
+                "nha nghi",
+                "don gian",
+                "trung tam",
+            },
         }
 
         expected = style_map.get(trip_style, set())
         if not expected:
             return 0.5
         return self._keyword_overlap_score(list(expected), list(tokens))
-    
+
     # So khớp ghi chú tự do của user với khách sạn.
     def _free_text_match_score(self, note: str, hotel: DiscoverHotel) -> float:
-        tokens = self._tokenize(note)
+        tokens = self._tokenize(note, use_model_tokens=True)
         hotel_tokens = self._hotel_feature_tokens(hotel)
         if not tokens:
             return 0.5
         return self._jaccard(tokens, hotel_tokens)
-    
+
     def _hotel_feature_tokens(self, hotel: DiscoverHotel) -> set[str]:
         # Lấy token đặc trưng của khách sạn, không tính điểm gần đó.
         tokens = set(self._tokenize(hotel.name))
-        tokens.update(self._tokenize(hotel.description or ""))
+        tokens.update(self._tokenize(hotel.description or "", use_model_tokens=True))
         tokens.update(self._tokenize(hotel.address or ""))
-        tokens.update(self._tokenize(hotel.deal or ""))
+        tokens.update(self._tokenize(hotel.deal or "", use_model_tokens=True))
         tokens.update(self._tokenize(" ".join(hotel.amenities)))
         return tokens
 
@@ -603,27 +828,32 @@ class HotelRankingService:
         for nearby_place in hotel.nearby_places:
             tags.update(self._tokenize(nearby_place.category or ""))
             tags.update(self._tokenize(nearby_place.name))
-            tags.update(self._tokenize(nearby_place.description or ""))
+            tags.update(
+                self._tokenize(nearby_place.description or "", use_model_tokens=True)
+            )
         if hotel.address:
             tags.update(self._tokenize(hotel.address))
         return tags
 
-    def _collection_tokens(self, collection: CollectionPublic) -> set[str]:
+    def _collection_tokens(self, collection: CollectionDocument) -> set[str]:
         # Lấy token đặc trưng từ bộ sưu tập.
         tokens = set(self._tokenize(collection.name))
-        tokens.update(self._tokenize(collection.description or ""))
+        tokens.update(
+            self._tokenize(collection.description or "", use_model_tokens=True)
+        )
         tokens.update(self._tokenize(" ".join(collection.tags)))
-        for place in collection.places:
-            place_id = getattr(place, "place_id", "")
+        for place_id in collection.place_ids or []:
             if place_id:
                 tokens.update(self._tokenize(place_id))
         return tokens
 
-    def _event_tokens(self, event: UserBehaviorEvent) -> set[str]:
+    def _event_tokens(self, event: UserBehaviorEventDocument) -> set[str]:
         # Lấy token từ một sự kiện hành vi.
-        tokens = set(self._tokenize(event.hotel_name or ""))
-        tokens.update(self._tokenize(event.hotel_id or ""))
-        tokens.update(self._tokenize(" ".join(event.metadata.values())))
+        tokens = set(self._tokenize(event.target_name or ""))
+        tokens.update(self._tokenize(event.target_id or ""))
+        tokens.update(
+            self._tokenize(" ".join(event.metadata.values()), use_model_tokens=True)
+        )
         return tokens
 
     # Chuẩn hoá và mở rộng token tiện ích (có cả cụm từ + đồng nghĩa).
@@ -647,34 +877,62 @@ class HotelRankingService:
         return expanded
 
     # Tính mức trùng khớp giữa hai tập từ khóa.
-    def _keyword_overlap_score(self, keywords: Iterable[str], tokens: Iterable[str]) -> float:
-        keyword_set = {self._normalize_token(item) for item in keywords if self._normalize_token(item)}
-        token_set = {self._normalize_token(item) for item in tokens if self._normalize_token(item)}
+    def _keyword_overlap_score(
+        self, keywords: Iterable[str], tokens: Iterable[str]
+    ) -> float:
+        keyword_set = {
+            self._normalize_token(item)
+            for item in keywords
+            if self._normalize_token(item)
+        }
+        token_set = {
+            self._normalize_token(item)
+            for item in tokens
+            if self._normalize_token(item)
+        }
         if not keyword_set:
             return 0.5
         overlap = len(keyword_set.intersection(token_set))
         return self._clamp(overlap / len(keyword_set), 0.0, 1.0)
 
     # Tính overlap tiện ích có xét đồng nghĩa/alias.
-    def _amenity_overlap_score(self, amenities: Iterable[str], amenity_tokens: Iterable[str]) -> float:
+    def _amenity_overlap_score(
+        self, amenities: Iterable[str], amenity_tokens: Iterable[str]
+    ) -> float:
         expanded_keywords = self._expand_amenity_terms(amenities)
-        token_set = {self._normalize_token(item) for item in amenity_tokens if self._normalize_token(item)}
+        token_set = {
+            self._normalize_token(item)
+            for item in amenity_tokens
+            if self._normalize_token(item)
+        }
         if not expanded_keywords:
             return 0.5
         overlap = len(expanded_keywords.intersection(token_set))
         return self._clamp(overlap / len(expanded_keywords), 0.0, 1.0)
 
     # Kiểm tra tất cả tiện ích bắt buộc có xuất hiện theo nghĩa tương đương.
-    def _amenity_contains_all(self, amenities: Iterable[str], amenity_tokens: Iterable[str]) -> bool:
-        token_set = {self._normalize_token(item) for item in amenity_tokens if self._normalize_token(item)}
+    def _amenity_contains_all(
+        self, amenities: Iterable[str], amenity_tokens: Iterable[str]
+    ) -> bool:
+        token_set = {
+            self._normalize_token(item)
+            for item in amenity_tokens
+            if self._normalize_token(item)
+        }
         for amenity in amenities:
             if not self._expand_amenity_term(amenity).intersection(token_set):
                 return False
         return True
 
     # Kiểm tra có bất kỳ tiện ích loại trừ nào xuất hiện theo nghĩa tương đương.
-    def _amenity_contains_any(self, amenities: Iterable[str], amenity_tokens: Iterable[str]) -> bool:
-        token_set = {self._normalize_token(item) for item in amenity_tokens if self._normalize_token(item)}
+    def _amenity_contains_any(
+        self, amenities: Iterable[str], amenity_tokens: Iterable[str]
+    ) -> bool:
+        token_set = {
+            self._normalize_token(item)
+            for item in amenity_tokens
+            if self._normalize_token(item)
+        }
         return bool(self._expand_amenity_terms(amenities).intersection(token_set))
 
     # Mở rộng danh sách tiện ích thành tập từ có đồng nghĩa.
@@ -696,16 +954,15 @@ class HotelRankingService:
         alias_index: dict[str, set[str]] = {}
         for canonical, variants in groups.items():
             canonical_norm = self._normalize_token(canonical)
-            variant_norms = {self._normalize_token(value) for value in variants if self._normalize_token(value)}
+            variant_norms = {
+                self._normalize_token(value)
+                for value in variants
+                if self._normalize_token(value)
+            }
             combined = {canonical_norm, *variant_norms}
             for token in combined:
                 alias_index[token] = set(combined)
         return alias_index
-
-    # Kiểm tra source có đủ toàn bộ từ khóa hay không.
-    def _contains_all(self, keywords: Iterable[str], source: Iterable[str]) -> bool:
-        source_tokens = {self._normalize_token(item) for item in source}
-        return all(self._normalize_token(item) in source_tokens for item in keywords)
 
     # Kiểm tra source có chứa ít nhất một từ khóa hay không.
     def _contains_any(self, keywords: Iterable[str], source: Iterable[str]) -> bool:
@@ -714,15 +971,18 @@ class HotelRankingService:
 
     # Tính Jaccard giữa hai tập token.
     def _jaccard(self, left: Iterable[str], right: Iterable[str]) -> float:
-        left_set = {self._normalize_token(item) for item in left if self._normalize_token(item)}
-        right_set = {self._normalize_token(item) for item in right if self._normalize_token(item)}
+        left_set = {
+            self._normalize_token(item) for item in left if self._normalize_token(item)
+        }
+        right_set = {
+            self._normalize_token(item) for item in right if self._normalize_token(item)
+        }
         if not left_set or not right_set:
             return 0.0
         union = left_set.union(right_set)
         intersection = left_set.intersection(right_set)
         return len(intersection) / len(union)
-    
-    # hàm này để làm gì? hả
+
     # Hàm này tính trọng số giảm dần theo thời gian cho các sự kiện hành vi của người dùng, để các tương tác gần đây có ảnh hưởng lớn hơn đến điểm lịch sử.
     def _recency_weight(self, when: datetime) -> float:
         if when.tzinfo is None:
@@ -733,7 +993,9 @@ class HotelRankingService:
         return self._clamp(math.exp(-age_days / 180.0), 0.25, 1.0)
 
     # Ước lượng mức độ nặng của thời tiết.
-    def _weather_severity(self, weather: list[WeatherInfo], profile: UserTravelPreference) -> float:
+    def _weather_severity(
+        self, weather: list[WeatherInfo], profile: UserTravelPreference
+    ) -> float:
         if not weather:
             return 0.0
         avg_rain = sum(item.rain_chance for item in weather) / len(weather)
@@ -829,8 +1091,8 @@ class HotelRankingService:
             f"so_nguoi: {trip_criteria.party_size if trip_criteria.party_size is not None else ''}",
         ]
         return " | ".join(part for part in parts if part)
-    
-    def _collections_semantic_text(self, collections: list[CollectionPublic]) -> str:
+
+    def _collections_semantic_text(self, collections: list[CollectionDocument]) -> str:
         # Ghép text từ các bộ sưu tập đã lưu.
         parts: list[str] = []
         for collection in collections[:10]:
@@ -839,14 +1101,13 @@ class HotelRankingService:
                 parts.append(f"mo_ta_bo_suu_tap: {collection.description}")
             if collection.tags:
                 parts.append(f"tag: {'; '.join(collection.tags)}")
-            if collection.places:
-                place_ids = [getattr(place, "place_id", "") for place in collection.places]
-                place_ids = [place_id for place_id in place_ids if place_id]
+            if collection.place_ids:
+                place_ids = [pid for pid in collection.place_ids if pid]
                 if place_ids:
                     parts.append(f"dia_diem_da_luu: {'; '.join(place_ids)}")
         return " | ".join(parts)
 
-    def _history_semantic_text(self, history: list[UserBehaviorEvent]) -> str:
+    def _history_semantic_text(self, history: list[UserBehaviorEventDocument]) -> str:
         # Ghép text từ lịch sử hành vi.
         parts: list[str] = []
         for event in history[:30]:
@@ -855,9 +1116,8 @@ class HotelRankingService:
                     piece
                     for piece in [
                         f"su_kien: {event.event_type.value}",
-                        f"ten_khach_san: {event.hotel_name or ''}",
-                        f"hotel_id: {event.hotel_id or ''}",
-                        f"gia_tri: {event.value if event.value is not None else ''}",
+                        f"ten_muc_tieu: {event.target_name or ''}",
+                        f"target_id: {event.target_id or ''}",
                         f"ghi_chu: {'; '.join(event.metadata.values())}",
                     ]
                     if piece
@@ -872,14 +1132,16 @@ class HotelRankingService:
         return self.semantic_encoder.similarity(left_text, right_text)
 
     # Trộn điểm rule với điểm ngữ nghĩa.
-    def _blend_rule_and_semantic(self, rule_score: float, semantic_score: float | None) -> float:
+    def _blend_rule_and_semantic(
+        self, rule_score: float, semantic_score: float | None
+    ) -> float:
         if semantic_score is None:
             return self._clamp(rule_score, 0.0, 1.0)
         return self._clamp((0.65 * rule_score) + (0.35 * semantic_score), 0.0, 1.0)
 
     # Bọc lại hàm tokenize cho gọn.
-    def _tokenize(self, text: str) -> list[str]:
-        return list(tokenize_text(text))
+    def _tokenize(self, text: str, use_model_tokens: bool = False) -> list[str]:
+        return list(tokenize_text(text, use_model_tokens))
 
     # Bọc lại hàm normalize cho gọn.
     def _normalize_token(self, text: str) -> str:
@@ -904,69 +1166,62 @@ class HotelRankingService:
             return places
 
         profile = UserTravelPreference()
-        collections: list[CollectionPublic] = []
-        history: list[UserBehaviorEvent] = []
+        collections: list[CollectionDocument] = []
+        history: list[UserBehaviorEventDocument] = []
         scoring_weights: ScoringWeights | None = None
 
         if requester_uid:
             try:
                 private_user = await user_repo.get_user(requester_uid)
-                if not private_user:
-                    private_user = {}
+                if private_user:
+                    if private_user.travel_profile:
+                        profile = private_user.travel_profile
+                    if private_user.scoring_weights:
+                        scoring_weights = private_user.scoring_weights
 
-                profile_data = private_user.get("travel_profile")
-                if isinstance(profile_data, UserTravelPreference):
-                    profile = profile_data
-                elif isinstance(profile_data, dict):
-                    try:
-                        profile = UserTravelPreference.model_validate(profile_data)
-                    except Exception:
-                        profile = UserTravelPreference()
+                # Lấy song song collections (own) và history
+                collections_task = asyncio.create_task(
+                    collection_repo.get_user_collections(requester_uid)
+                )
+                history_task = asyncio.create_task(
+                    behavior_service.get_recent_events(requester_uid, limit=20)
+                )
 
-                collection_data = private_user.get("collections", [])
-                if isinstance(collection_data, list):
-                    parsed_collections: list[CollectionPublic] = []
-                    for item in collection_data:
-                        if isinstance(item, CollectionPublic):
-                            parsed_collections.append(item)
-                        elif isinstance(item, dict):
-                            try:
-                                parsed_collections.append(CollectionPublic.model_validate(item))
-                            except Exception:
-                                continue
-                    collections = parsed_collections[:50]
+                collections_owned, res_history = await asyncio.gather(
+                    collections_task, history_task, return_exceptions=True
+                )
 
-                history_data = private_user.get("user_behavior_history", [])
-                if isinstance(history_data, list):
-                    parsed_history: list[UserBehaviorEvent] = []
-                    for event in history_data:
-                        if isinstance(event, UserBehaviorEvent):
-                            parsed_history.append(event)
-                        elif isinstance(event, dict):
-                            try:
-                                parsed_history.append(UserBehaviorEvent.model_validate(event))
-                            except Exception:
-                                continue
-                    history = parsed_history[:100]
+                if isinstance(collections_owned, list):
+                    collections = collections_owned[:20]
+                else:
+                    collections = []
 
-                weight_data = private_user.get("scoring_weights")
-                if isinstance(weight_data, ScoringWeights):
-                    scoring_weights = weight_data
-                elif isinstance(weight_data, dict):
-                    try:
-                        scoring_weights = ScoringWeights.model_validate(weight_data)
-                    except Exception:
-                        scoring_weights = None
+                if isinstance(res_history, list):
+                    history = res_history[:20]
+                else:
+                    history = []
+
             except Exception as exc:
-                logger.warning(f"Không tải được personalization context cho ranking: {str(exc)}")
+                logger.warning(
+                    f"Không tải được personalization context cho ranking: {str(exc)}"
+                )
 
         personality_note = (payload.personality or "").strip()
         if personality_note:
             existing_notes = (profile.notes or "").strip()
-            profile.notes = f"{existing_notes}. {personality_note}" if existing_notes else personality_note
+            profile.notes = (
+                f"{existing_notes}. {personality_note}"
+                if existing_notes
+                else personality_note
+            )
+            logger.debug(f"Đã thêm personality note vào profile: {profile.notes}")
 
         # trip_criteria đã được chuẩn hoá và đồng bộ trong DiscoverRequest validator.
-        trip_criteria = payload.trip_criteria.model_copy(deep=True) if payload.trip_criteria else TripSearchCriteria()
+        trip_criteria = (
+            payload.trip_criteria.model_copy(deep=True)
+            if payload.trip_criteria
+            else TripSearchCriteria()
+        )
 
         if weather_by_identity is None:
             weather_by_identity = {}
@@ -980,12 +1235,15 @@ class HotelRankingService:
             history=history,
             weights=scoring_weights,
             limit=min(
-                payload.max_ranked_hotels if payload.max_ranked_hotels is not None else len(places),
+                payload.max_ranked_hotels
+                if payload.max_ranked_hotels is not None
+                else len(places),
                 len(places),
             ),
         )
 
         ranked_response = await self.rank_hotels(hotel_ranking_request)
         return [item.hotel for item in ranked_response.ranked_hotels]
-        
+
+
 hotel_ranking_service = HotelRankingService()

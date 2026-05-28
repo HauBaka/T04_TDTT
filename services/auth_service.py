@@ -1,106 +1,97 @@
 from repositories.user_repo import user_repo
 from schemas.auth_schema import AuthResponse
 from schemas.response_schema import ResponseSchema
-from core.exceptions import AppException
+from core.exceptions import AppException, InternalServerError, NotFoundError
 from datetime import datetime, timezone
 import uuid
 from repositories.collection_repo import collection_repo
 from schemas.collection_schema import CollectionCreateRequest, CollectionVisibility
-from firebase_admin import auth
+from services.conversation_service import conversation_service
+from schemas.user_schema import UserCreateRequest
 
 class AuthenticationService:
-    def __init__(self, token: str) -> None:
-        self.token = token
+    def __init__(self, uid: str, email: str) -> None:
+        self.uid = uid
+        self.email = email
 
     async def authenticate_user(self) -> ResponseSchema[AuthResponse]:
-        # 1. Giải mã và xác thực Token từ Firebase
-        decoded_info = self._verify_token()
-        uid = decoded_info['uid']
-        email = decoded_info.get('email')
 
+        now = datetime.now(timezone.utc)
         try:
-            # 2. Kiểm tra user đã tồn tại chưa
-            user = await user_repo.get_user(uid)
+            # Kiểm tra user đã tồn tại chưa
+            user = await user_repo.get_user(self.uid)
+            # --- TRƯỜNG HỢP ĐÃ TỒN TẠI ---
+            
+            # Cập nhật last_login
+            update_data = {"last_login": now}
+            await user_repo.batch_update_users([self.uid], [update_data])
 
-            if not user:
-                # --- TRƯỜNG HỢP TẠO MỚI ---
-                
-                # 3. Sinh username duy nhất (có check trùng)
-                username = await self._generate_unique_username()
-                
-                # 4. Tạo collection "Liked" mặc định và lấy ID
-                liked_req = CollectionCreateRequest(
-                    name="Liked", 
-                    description="Your liked accommodations", 
-                    tags = [],
-                    visibility=CollectionVisibility.PRIVATE,
-                    thumbnail_url=None
-                )
-                new_collection = await collection_repo.create_collection(uid, liked_req.model_dump())
+        except NotFoundError:
+            # --- TRƯỜNG HỢP TẠO MỚI ---
+            
+            # Sinh username duy nhất (có check trùng)
+            username = await self._generate_unique_username()
+            
+            # Tạo collection "Liked" mặc định và lấy ID
+            liked_req = CollectionCreateRequest(
+                name="Đã thích", 
+                description="Những địa điểm bạn đã thích", 
+                tags = [],
+                visibility=CollectionVisibility.PRIVATE,
+                thumbnail_url=None
+            )
+            liked_collection = await collection_repo.create_collection(self.uid, liked_req)
 
-                if not new_collection or not new_collection.get("id"):
-                    raise AppException(status_code=500, message="Failed to initialize user data")
-                
-                liked_collection_id = new_collection.get("id")
+            # Tạo default chatbot conversation
+            chatbot_conversation = await conversation_service.get_or_create_default_chatbot_conversation(self.uid)
+            if not chatbot_conversation.data:
+                raise InternalServerError(message="Failed to create default chatbot conversation")
 
-                # 5. Lưu User mới với đầy đủ thông tin
-                user_data = {
-                    "uid": uid,
-                    "username": username,
-                    "username_lower": username.lower(),  # Dùng để tìm kiếm không phân biệt hoa thường
-                    "display_name": self._generate_display_name(),
-                    "email": email,
-                    "liked_collection": liked_collection_id, # Lưu ID vào user theo yêu cầu
-                    "created_at": datetime.now(timezone.utc),
-                    "last_login": datetime.now(timezone.utc)
-                }
+            # Lưu User mới với đầy đủ thông tin
+            user_request = UserCreateRequest(
+                uid = self.uid,
+                username = username,
+                username_lower = username.lower(),
+                email=self.email,
+                phone_number=None,
 
-                await user_repo.create_user(user_data)
-                user = user_data  # Dùng dữ liệu vừa tạo để trả về response
+                display_name=self._generate_display_name(),
+                avatar_url=None,
+                bio=None,
+                chatbot_conversation=chatbot_conversation.data.id,
 
-            else:
-                # --- TRƯỜNG HỢP ĐÃ TỒN TẠI ---
-                
-                # 6. Cập nhật last_login
-                update_data = {"last_login": datetime.now(timezone.utc)}
-                await user_repo.update_user(uid, update_data)
-
-            # 7. Trả về ResponseSchema bọc AuthResponse
-            return ResponseSchema(
-                status_code=200,
-                message="Success",
-                data=AuthResponse(
-                    uid=uid,
-                    username=user.get("username", ""),
-                    display_name=user.get("display_name", ""),
-                    email=user.get("email")
-                )
+                liked_collection=liked_collection.id,
+                created_at=now,
+                last_login=now,
+                last_updated=None
             )
 
-        except Exception as e:
-            # Không rollback nữa
-            if isinstance(e, AppException):
-                raise e
-            raise AppException(status_code=500, message="Authentication initialization failed")
+            user = await user_repo.create_user(user_request)
 
+        # Trả về ResponseSchema bọc AuthResponse
+        return ResponseSchema(
+            status_code=200,
+            message="Success",
+            data=AuthResponse(
+                uid=self.uid,
+                username=user.username,
+                display_name=user.display_name,
+                email=self.email,
+                avatar_url=user.avatar_url
+            )
+        )
 
     async def _generate_unique_username(self) -> str:
         """Sinh username ngẫu nhiên và kiểm tra trùng lặp."""
         for _ in range(5):  # Thử tối đa 5 lần để tránh vòng lặp vô hạn
             new_username = f"user_{uuid.uuid4().hex[:8]}"
             # Truy vấn vào DB xem có ai dùng tên này chưa
-            existing = await user_repo.get_user_by_username(new_username)
-            if not existing:
+            try:
+                await user_repo.get_user_by_username(new_username)
+            except NotFoundError:
                 return new_username
-        raise AppException(status_code=500, message="Failed to generate unique username")
+        raise InternalServerError(message="Failed to generate unique username")
 
 
     def _generate_display_name(self) -> str:
-        return f"Booking4U {uuid.uuid4().hex[:6]}"
-
-    def _verify_token(self) -> dict:
-        try:
-            # Sử dụng firebase_admin.auth để xác thực toke
-            return auth.verify_id_token(self.token)
-        except Exception as e:
-            raise AppException(status_code=401, message=f"Failed to verify token: {str(e)}")
+        return f"Lodgy4U {uuid.uuid4().hex[:6]}"

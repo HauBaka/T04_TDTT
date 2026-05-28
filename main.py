@@ -1,33 +1,47 @@
+import time
+
+import httpx
 from fastapi import FastAPI, Request
 from fastapi.concurrency import asynccontextmanager
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from api.health import health_router
-from api.discover import discover_router
-from api.auth import auth_router
-from api.user import user_router
-from api.collection import collection_router
-from api.invitation import invitation_router
-from api.notification import notification_router
-from api.conversation import conversation_router
-from api.trip import trip_router
-from core.database import firebase_manager
-from core.exceptions import AppException
-from mock_data.virtual_review import virtual_review_manager
-from externals.PhoBERT import PhoBERT
-from externals.SemanticModel import semantic_model_client
 from loguru import logger
+from slowapi.middleware import SlowAPIMiddleware
+from transformers import logging as transformers_logging
 
 import core.http_client as http_client
-import httpx
+from api.auth import auth_router
+from api.chatbot import chatbot_router
+from api.collection import collection_router
+from api.conversation import conversation_router
+from api.discover import discover_router
+from api.health import health_router
+from api.invitation import invitation_router
+from api.notification import notification_router
+from api.trip import trip_router
+from api.upload import upload_router
+from api.user import user_router
+from api.user_travel_preference import user_travel_preference_router
+from api.view import view_router
+from core.database import firebase_manager
+from core.exceptions import AppException
+from core.limiter import AutoRateLimitMiddleware, limiter
+from externals.PhoBERT import PhoBERT
+from externals.SemanticModel import semantic_model_client
+from mock_data.virtual_review import virtual_review_manager
+from services.discover_background_worker import discover_background_worker
+
+
 # Khởi tạo các thành phần cần thiết
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    transformers_logging.set_verbosity_error()  # Ẩn warnings từ transformers
     # Khởi tạo Firebase
-    firebase_manager.initialize() 
-    # Khởi tạo Virtual Review 
+    await firebase_manager.initialize()
+    # Khởi tạo Virtual Review
     try:
-        virtual_review_manager.initialize("mock_data/user_reviews.csv")
+        virtual_review_manager.initialize("mock_data/user_reviews_vi.csv")
     except FileNotFoundError as e:
         logger.error(f"Error initializing virtual review manager: {e}")
 
@@ -37,12 +51,54 @@ async def lifespan(app: FastAPI):
     semantic_model_client.load_model()
     # Khởi tạo HTTP client
     http_client._http_client = httpx.AsyncClient(timeout=10.0)
+    await discover_background_worker.start()
+
     yield
 
+    await discover_background_worker.stop()
     if http_client._http_client:
         await http_client._http_client.aclose()
 
+
 app = FastAPI(lifespan=lifespan)
+app.state.limiter = limiter
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://app.haubaka.xyz",
+        "http://localhost:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+app.add_middleware(SlowAPIMiddleware)
+app.add_middleware(AutoRateLimitMiddleware)
+
+
+# Middleware để log thông tin request và response
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start = time.time()
+
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+    except Exception:
+        status_code = 500
+        logger.exception(f"Request failed: {request.method} {request.url.path}")
+        raise
+    finally:
+        process_time = (time.time() - start) * 1000
+        logger.info(
+            f"{request.method} {request.url.path} "
+            f"status={status_code} "
+            f"time={process_time:.2f}ms"
+        )
+
+    return response
+
+
 # Đăng ký router
 app.include_router(health_router, tags=["health"])
 app.include_router(discover_router, tags=["discover"])
@@ -53,19 +109,23 @@ app.include_router(invitation_router, tags=["invitation"])
 app.include_router(notification_router, tags=["notification"])
 app.include_router(conversation_router, tags=["conversation"])
 app.include_router(trip_router, tags=["trip"])
+app.include_router(chatbot_router, tags=["chatbot"])
+app.include_router(view_router, tags=["view"])
+app.include_router(upload_router, tags=["upload"])
+app.include_router(user_travel_preference_router, tags=["user_preference"])
+
+
 # Xử lý các lỗi
-@app.exception_handler(AppException) # Xử lý lỗi ứng dụng
+@app.exception_handler(AppException)  # Xử lý lỗi ứng dụng
 async def app_exception_handler(request: Request, exc: AppException):
     logger.error(f"AppException: {exc.message}")
     return JSONResponse(
         status_code=exc.status_code,
-        content={
-            "status_code": exc.status_code,
-            "message": exc.message,
-            "data": None
-        }
+        content={"status_code": exc.status_code, "message": exc.message, "data": None},
     )
-@app.exception_handler(Exception) # Xử lý lỗi không mong muốn
+
+
+@app.exception_handler(Exception)  # Xử lý lỗi không mong muốn
 async def general_exception_handler(request: Request, exc: Exception):
     logger.error(f"Unhandled Exception: {str(exc)}")
     return JSONResponse(
@@ -73,26 +133,32 @@ async def general_exception_handler(request: Request, exc: Exception):
         content={
             "status_code": 500,
             "message": "An unexpected error occurred.",
-            "data": None
-        }
+            "data": None,
+        },
     )
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     clean_errors = []
     for error in exc.errors():
-        clean_errors.append({
-            "field": " -> ".join([str(x) for x in error.get("loc", [])]),
-            "message": error.get("msg")
-        })
+        clean_errors.append(
+            {
+                "field": " -> ".join([str(x) for x in error.get("loc", [])]),
+                "message": error.get("msg"),
+            }
+        )
 
     return JSONResponse(
         status_code=422,
         content={
             "status_code": 422,
             "message": "Validation Error",
-            "errors": clean_errors
-        }
+            "errors": clean_errors,
+        },
     )
+
+
 # default route
 @app.get("/", status_code=200)
 async def root():

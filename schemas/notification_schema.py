@@ -1,6 +1,8 @@
-from pydantic import BaseModel
 from datetime import datetime
 from enum import Enum
+
+from pydantic import BaseModel, ConfigDict
+
 
 class NotificationType(str, Enum):
     SYSTEM = "system"
@@ -9,8 +11,12 @@ class NotificationType(str, Enum):
     CONVERSATION_MESSAGE = "conversation message"
     TRIP_UPDATE = "trip update"
 
-class NotificationResponse(BaseModel):
+
+class NotificationDocument(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
+    receiver_id: str
     send_at: datetime
     type: NotificationType
     content: str
@@ -18,5 +24,25 @@ class NotificationResponse(BaseModel):
     ref_id: str
     actor_id: str
 
-class UpdateNotificationRequest(BaseModel):
+
+class NotificationResponse(BaseModel):
+    id: str
+    receiver_id: str
+    send_at: datetime
+    type: NotificationType
+    content: str
+    read: bool = False
+    ref_id: str
+    actor_id: str
+
+
+class NotificationCreateRequest(BaseModel):
+    receiver_id: str
+    type: NotificationType
+    content: str
+    ref_id: str
+    actor_id: str
+
+
+class NotificationUpdateRequest(BaseModel):
     read: bool

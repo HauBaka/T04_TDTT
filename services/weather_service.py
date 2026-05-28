@@ -1,27 +1,36 @@
 import logging
 from schemas.discover_schema import DiscoverHotel, GPSCoordinates, WeatherInfo
 from externals.WeatherOpenMeteo import weather_open_meteo
-from datetime import datetime, timedelta
+from datetime import datetime
 from services.hotel_ranking_service import hotel_ranking_service
+from core.cache import cache_get, cache_set, cache_key
 logger = logging.getLogger(__name__)
+
+WEATHER_TTL_SECONDS = 3600
 
 class WeatherService:
     def __init__(self):
         self.weather_api = weather_open_meteo
 
-    async def get_weather(self, lat: float, lng: float, from_date: str | None = None, to_date: str | None = None) -> list[WeatherInfo]:
-        # Nếu không có from_date hoặc to_date, mặc định lấy weather cho 3 ngày từ hôm nay.
-        if from_date is None or to_date is None:
-            now = datetime.now()
-            # Lấy ngày hôm nay
-            from_date = now.strftime("%Y-%m-%d")
-            # Cộng thêm 2 ngày nữa (Hôm nay + Ngày mai + Ngày mốt = 3 ngày)
-            to_date = (now + timedelta(days=2)).strftime("%Y-%m-%d")
-        elif not from_date:
-            from_date=datetime.now().strftime("%Y-%m-%d")
-        elif not to_date:
-            to_date=(datetime.strptime(from_date, "%Y-%m-%d") + timedelta(days=2)).strftime("%Y-%m-%d")
-        return await self.weather_api.search(lat, lng, from_date, to_date)
+    async def get_weather(self, lat: float, lng: float, from_date: str, to_date: str) -> list[WeatherInfo]:
+        # Cố gắng lấy từ cache trước
+        cache_key_str = cache_key("weather", f"{lat:.4f}", f"{lng:.4f}", from_date, to_date)
+        cached = await cache_get(cache_key_str)
+        if cached:
+            results = []
+            for item in cached:
+                try:
+                    results.append(WeatherInfo.model_validate(item))
+                except Exception as exc:
+                    logger.warning(f"Failed to parse cached weather item: {item}, error: {str(exc)}")
+
+            if results:
+                return results
+
+        result = await self.weather_api.search(lat, lng, from_date, to_date)
+        await cache_set(cache_key_str, [w.model_dump(mode="python") for w in result], WEATHER_TTL_SECONDS)
+
+        return result
 
     def get_weather_alert_flags(self, daily_weathers: list[WeatherInfo]) -> list[str]:
         flags = set()
@@ -75,6 +84,7 @@ class WeatherService:
         to_date = check_out_date.strftime("%Y-%m-%d")
 
         if destination_gps is None:
+            logger.warning("Không có GPS điểm đến, không thể lấy weather.")
             return {}
 
         try:
